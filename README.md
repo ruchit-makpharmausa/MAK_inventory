@@ -88,20 +88,29 @@ The website uses port `567`. SQL Server continues to use port `1433` with certif
 
 The home page requires a username and password before opening the inventory dashboard. To create the login tables, select the existing inventory database in SQL Server Management Studio and run [scripts/login-tables.sql](./scripts/login-tables.sql). This separate SQL script creates only `dbo.app_users` and `dbo.user_sessions`; it does not create a database or change inventory data.
 
-Create the first account from PowerShell in the app folder. Run the commands one line at a time; the password must be at least 12 characters:
+For a new installation, create the first **administrator** account from PowerShell in the app folder. Run the commands one line at a time; the password must be at least 12 characters. Existing installations must complete the admin upgrade below before starting the updated app.
 
 ```powershell
 $env:APP_USER_NAME = "your.username"
 $env:APP_USER_DISPLAY_NAME = "Your Name"
+$env:APP_USER_ROLE = "admin"
 $securePassword = Read-Host "Choose a password (12-256 characters)" -AsSecureString
 $env:APP_USER_PASSWORD = [System.Net.NetworkCredential]::new("", $securePassword).Password
 try { npm.cmd run create:user } finally {
   Remove-Variable securePassword -ErrorAction SilentlyContinue
-  Remove-Item Env:APP_USER_NAME, Env:APP_USER_DISPLAY_NAME, Env:APP_USER_PASSWORD -ErrorAction SilentlyContinue
+  Remove-Item Env:APP_USER_NAME, Env:APP_USER_DISPLAY_NAME, Env:APP_USER_PASSWORD, Env:APP_USER_ROLE -ErrorAction SilentlyContinue
 }
 ```
 
-The account command stores a salted password hash, not the plaintext password. Run it once per account. Sign-in sessions are stored in SQL Server and expire after eight hours. The app's SQL login needs the permissions listed at the end of `scripts/login-tables.sql`.
+The account command stores a salted password hash, not the plaintext password. `APP_USER_ROLE` defaults to `user`; set it to `admin` only for trusted administrators. Sign-in sessions are stored in SQL Server and expire after eight hours. The app's SQL login needs the permissions listed at the end of [scripts/login-tables.sql](./scripts/login-tables.sql).
+
+### Admin panel and existing-account upgrade
+
+For existing installations, stop the app and open [scripts/user-admin-upgrade.sql](./scripts/user-admin-upgrade.sql) in SQL Server Management Studio against the inventory database. Replace `REPLACE_WITH_EXISTING_USERNAME` with the username of the trusted, active account that should be an administrator, then execute as a database administrator and restart the updated app. The script adds `is_admin` with a default of false and promotes only the explicitly selected account. It rolls back if that account is not found. It can be rerun; it does not change inventory data, passwords, or existing administrator assignments. No schema changes run automatically. Running the login-table script alone does not upgrade an existing users table.
+
+Sign in as an administrator and select **Admin Panel** in the sidebar. Enter a display name, unique username, role (User by default), password, and matching confirmation, then choose **Add user**. Passwords require 12–256 characters. New accounts are active immediately and appear in the users list; share their password securely. The form clears after a successful save. Account editing, deletion, and password resets are not included.
+
+Only administrators can list or add users, including when calling `GET /api/users` or `POST /api/users` directly. Regular users retain inventory access without seeing the admin navigation. Administrator access is checked against the current database record on every API request. Account responses never include password hashes.
 
 ### Publish updates from the development PC
 

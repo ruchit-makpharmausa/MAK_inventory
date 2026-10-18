@@ -11,6 +11,7 @@ BEGIN
         display_name NVARCHAR(150) NOT NULL,
         password_hash VARCHAR(200) NOT NULL,
         is_active BIT NOT NULL CONSTRAINT DF_app_users_is_active DEFAULT (1),
+        is_admin BIT NOT NULL CONSTRAINT DF_app_users_is_admin DEFAULT (0),
         created_at DATETIME2(3) NOT NULL CONSTRAINT DF_app_users_created_at DEFAULT (SYSUTCDATETIME()),
         CONSTRAINT UQ_app_users_username UNIQUE (username)
     );

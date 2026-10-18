@@ -66,13 +66,13 @@ test('sign-in creates a cookie session and protects inventory APIs', async () =>
 
     const signedIn = await request('/api/auth/login', { body: { username: 'TEST.USER', password } });
     assert.equal(signedIn.response.status, 200);
-    assert.deepEqual(signedIn.data.user, { id: 7, username, displayName: 'Test User' });
+    assert.deepEqual(signedIn.data.user, { id: 7, username, displayName: 'Test User', isAdmin: false });
     const cookie = signedIn.response.headers.get('set-cookie').split(';')[0];
     assert.match(cookie, /^mak_inventory_session=[a-f0-9]{64}$/);
     assert.match(signedIn.response.headers.get('set-cookie'), /HttpOnly/i);
 
     const session = await request('/api/auth/session', { cookie });
-    assert.deepEqual(session.data.user, { id: 7, username, displayName: 'Test User' });
+    assert.deepEqual(session.data.user, { id: 7, username, displayName: 'Test User', isAdmin: false });
     const products = await request('/api/products', { cookie });
     assert.equal(products.response.status, 200);
     assert.deepEqual(products.data, []);

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import database from './database.js';
 import { mountAuthentication } from './auth.js';
+import { mountUserAdministration } from './users.js';
 
 const productSelect = `
   SELECT p.id, p.product_type_id AS productTypeId, pt.name AS productType,
@@ -77,6 +78,7 @@ export function createApp(db = database, { serveClient = true } = {}) {
     res.json({ status: 'ok', database: 'sqlserver' });
   }));
   mountAuthentication(app, db);
+  mountUserAdministration(app, db);
 
   app.get('/api/product-types', route(async (_req, res) => {
     res.json((await db.query('SELECT id, name FROM dbo.product_types ORDER BY name')).recordset);

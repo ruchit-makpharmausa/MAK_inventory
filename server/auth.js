@@ -6,7 +6,7 @@ const cookieName = 'mak_inventory_session';
 const sessionSeconds = 8 * 60 * 60;
 const dummyHash = `scrypt$${'0'.repeat(32)}$${'0'.repeat(128)}`;
 const tokenHash = (token) => createHash('sha256').update(token).digest('hex');
-const publicUser = (user) => ({ id: user.id, username: user.username, displayName: user.displayName });
+const publicUser = (user) => ({ id: user.id, username: user.username, displayName: user.displayName, isAdmin: user.isAdmin === true || user.isAdmin === 1 });
 
 export function sessionToken(req) {
   const value = (req.headers.cookie || '').split(';').map((part) => part.trim())
@@ -18,7 +18,7 @@ export function mountAuthentication(app, db) {
   const attempts = new Map();
   const forwardError = (error, next) => {
     if ([207, 208].includes(error.number)) {
-      error = Object.assign(new Error('Login tables are missing or incomplete. Run scripts/login-tables.sql in your inventory database.'), { status: 503 });
+      error = Object.assign(new Error('Login tables are missing or incomplete. Run scripts/login-tables.sql for a new installation, or scripts/user-admin-upgrade.sql for existing accounts, in your inventory database.'), { status: 503 });
     }
     next(error);
   };
@@ -32,7 +32,7 @@ export function mountAuthentication(app, db) {
     const token = sessionToken(req);
     if (!token) return null;
     const result = await db.query(`
-      SELECT u.id, u.username, u.display_name AS displayName
+      SELECT u.id, u.username, u.display_name AS displayName, u.is_admin AS isAdmin
       FROM dbo.user_sessions s JOIN dbo.app_users u ON u.id = s.user_id
       WHERE s.token_hash = @tokenHash AND s.expires_at > SYSUTCDATETIME() AND u.is_active = 1
     `, { tokenHash: [sql.Char(64), tokenHash(token)] });
@@ -76,7 +76,7 @@ export function mountAuthentication(app, db) {
       return res.status(400).json({ error: 'Enter a valid username and password.' });
     }
     const result = await db.query(`
-      SELECT id, username, display_name AS displayName, password_hash AS passwordHash, is_active AS isActive
+      SELECT id, username, display_name AS displayName, password_hash AS passwordHash, is_active AS isActive, is_admin AS isAdmin
       FROM dbo.app_users WHERE username = @username
     `, { username: [sql.NVarChar(100), username.trim().toLowerCase()] });
     const user = result.recordset[0];

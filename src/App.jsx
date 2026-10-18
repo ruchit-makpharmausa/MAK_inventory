@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import AdminPanel from './AdminPanel.jsx';
 
 const navItems = [
   ['dashboard', 'Dashboard', '◫'],
@@ -208,7 +209,8 @@ function App() {
     balance: sum.balance + Number(product.availableBalance),
   }), { received: 0, used: 0, balance: 0 }), [allProducts]);
 
-  const pageTitle = navItems.find(([key]) => key === page)?.[1] || 'Dashboard';
+  const visibleNavItems = user?.isAdmin ? [...navItems, ['admin', 'Admin Panel', '⚙']] : navItems;
+  const pageTitle = visibleNavItems.find(([key]) => key === page)?.[1] || 'Dashboard';
   const editingUnit = unitOption(editingProduct?.unit);
 
   if (authLoading) return <div className="auth-loading" role="status">Checking your sign-in…</div>;
@@ -223,7 +225,7 @@ function App() {
         </div>
         <div className="nav-label">WORKSPACE</div>
         <nav>
-          {navItems.map(([key, label, icon]) => (
+          {visibleNavItems.map(([key, label, icon]) => (
             <button className={`nav-item ${page === key ? 'active' : ''}`} key={key}
               onClick={() => { setPage(key); setMessage(null); }}>
               <span className="nav-icon">{icon}</span>{label}
@@ -261,6 +263,7 @@ function App() {
             onSaved={onTransactionSaved} />}
           {page === 'history' && <HistoryPage history={history} products={allProducts}
             selectedProductId={selectedProductId} onSelect={openHistory} onExport={exportHistory} />}
+          {page === 'admin' && user.isAdmin && <AdminPanel api={api} />}
         </div>
       </main>
 

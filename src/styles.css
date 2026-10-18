@@ -103,6 +103,10 @@ th.numeric { text-align: right; }
 .transaction-layout { display: grid; grid-template-columns: minmax(320px, .95fr) minmax(360px, 1.05fr); align-items: start; gap: 16px; }
 .transaction-form-panel { padding-bottom: 18px; }
 .transaction-form-panel form { display: grid; gap: 13px; padding: 0 20px; }
+.admin-fields { display: grid; gap: 13px; border: 0; margin: 0; padding: 0; min-width: 0; }
+.field-help { display: block; color: #778598; font-size: 10px; line-height: 1.5; margin-top: 5px; }
+.users-table { min-width: 420px; }
+.users-table td { white-space: normal; overflow-wrap: anywhere; }
 label { display: block; min-width: 0; color: #536376; font-size: 10px; font-weight: 600; line-height: 1.5; }
 label > input, label > select, label > textarea, label > .inline-select { margin-top: 6px; }
 input, select, textarea { border: 1px solid #dfe6ec; border-radius: 5px; background: #fff; color: #3e5063; outline: none; padding: 9px 10px; width: 100%; font-size: 10px; }
