@@ -11,6 +11,8 @@
     "start": "node server/index.js --production",
     "check:db": "node scripts/check-db.js",
     "create:user": "node scripts/create-user.js",
+    "check:user": "node scripts/user-password.js check",
+    "reset:password": "node scripts/user-password.js reset",
     "test": "node --test tests/*.test.js"
   },
   "dependencies": {

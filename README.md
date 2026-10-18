@@ -112,6 +112,56 @@ Sign in as an administrator and select **Admin Panel** in the sidebar. Enter a d
 
 Only administrators can list or add users, including when calling `GET /api/users` or `POST /api/users` directly. Regular users retain inventory access without seeing the admin navigation. Administrator access is checked against the current database record on every API request. Account responses never include password hashes.
 
+### Recover an account that cannot sign in
+
+`Invalid username or password` means the account was not found, is inactive, or the password did not match. It is not a firewall or browser-cache error. Website accounts in `dbo.app_users` are separate from the SQL Server credentials in `.env`. Granting administrator status does not set or reset an account's password.
+
+Run these commands **on the app server PC, from its updated project folder**, so they use the same `.env` as the app:
+
+```powershell
+$env:APP_USER_NAME = "your.username"
+npm.cmd run check:user
+```
+
+The check is read-only. It reports the configured server/database and whether the account is missing, inactive, has an unsupported password hash, or is active with a correctly formatted hash. It never displays password hashes. If the account is missing, first verify the username and database; do not create a duplicate account in another database. If it is inactive, have a database administrator review activation; recovery does not reactivate accounts.
+
+To verify the password you already know without changing it, keep `APP_USER_NAME` set and run:
+
+```powershell
+$securePassword = Read-Host "Current website password" -AsSecureString
+try {
+  $env:APP_USER_PASSWORD = [System.Net.NetworkCredential]::new("", $securePassword).Password
+  npm.cmd run check:user
+} finally {
+  Remove-Variable securePassword -ErrorAction SilentlyContinue
+  Remove-Item Env:APP_USER_PASSWORD -ErrorAction SilentlyContinue
+}
+```
+
+When a password is supplied, the check reports whether it matches using the same verifier as website login. Without it, only the account status and hash format are checked. If it matches but the website rejects it, verify both running apps use the same server/database and current backend code; also check Caps Lock, saved/autofilled credentials, and the login-attempt throttle. A 401 with `Invalid username or password` happens before cookies are issued, so changing cookie settings will not fix that error.
+
+To replace the password of an **existing active account**, enter a new password locally (not in chat or directly in SQL):
+
+```powershell
+$securePassword = Read-Host "New password (12-256 characters)" -AsSecureString
+$confirmation = Read-Host "Confirm new password" -AsSecureString
+try {
+  $password = [System.Net.NetworkCredential]::new("", $securePassword).Password
+  if ($password -cne [System.Net.NetworkCredential]::new("", $confirmation).Password) {
+    throw "Passwords do not match. Nothing was changed."
+  }
+  $env:APP_USER_PASSWORD = $password
+  npm.cmd run reset:password
+} finally {
+  Remove-Variable password, securePassword, confirmation -ErrorAction SilentlyContinue
+  Remove-Item Env:APP_USER_NAME, Env:APP_USER_PASSWORD -ErrorAction SilentlyContinue
+}
+```
+
+Recovery stores a fresh salted hash and revokes that account's existing sessions in one transaction. It never creates or activates an account, changes its role, or changes inventory records. If session deletion fails, the password change rolls back. It requires SELECT on `dbo.app_users`, UPDATE on its `password_hash` column, and DELETE on `dbo.user_sessions`; the normal application grants do not include UPDATE on users. A database administrator can run recovery with an authorized database login rather than broadening the app login's permissions. There is no public password-reset endpoint.
+
+After a successful reset, sign in with the new password at the same website address. No build or server restart is needed just for a password reset. After ten failed attempts from one IP, login is temporarily blocked for 15 minutes; resetting the password does not bypass this throttle. Never paste a plaintext password into `password_hash` or share passwords or hashes in diagnostic output.
+
 ### Publish updates from the development PC
 
 Make code changes on the development PC and push them to the repository's `main` branch. After each push, update the running server as follows:

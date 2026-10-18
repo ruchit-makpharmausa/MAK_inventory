@@ -13,10 +13,11 @@ export async function hashPassword(password) {
   return `scrypt$${salt}$${hash.toString('hex')}`;
 }
 
+export const validPasswordHash = (value) => typeof value === 'string' && value.length === 168 && /^scrypt\$[a-f0-9]{32}\$[a-f0-9]{128}$/.test(value);
+
 export async function verifyPassword(password, encoded) {
-  if (typeof password !== 'string' || password.length > 256 || typeof encoded !== 'string') return false;
-  const [algorithm, salt, hash, extra] = encoded.split('$');
-  if (algorithm !== 'scrypt' || !/^[a-f0-9]{32}$/.test(salt || '') || !/^[a-f0-9]{128}$/.test(hash || '') || extra !== undefined) return false;
+  if (typeof password !== 'string' || password.length > 256 || !validPasswordHash(encoded)) return false;
+  const [, salt, hash] = encoded.split('$');
   const actual = await scrypt(password, salt, 64, options);
   return timingSafeEqual(actual, Buffer.from(hash, 'hex'));
 }
