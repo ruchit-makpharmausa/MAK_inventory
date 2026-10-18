@@ -37,6 +37,22 @@ test('existing schema is checked using only a read; missing columns stop connect
   await assert.rejects(verifyExistingSchema(pool), (error) => error.status === 503 && /mak_item_code/.test(error.message));
 });
 
+test('query timeouts are distinguished from connection timeouts without exposing SQL details', () => {
+  const queryError = Object.assign(new Error('private-query-and-credentials'), { name: 'RequestError', code: 'ETIMEOUT' });
+  const queryFailure = connectionFailure(queryError);
+  assert.equal(queryFailure.status, 503);
+  assert.equal(queryFailure.code, 'ETIMEOUT');
+  assert.match(queryFailure.message, /accepted the connection.*query timed out/);
+  assert.match(queryFailure.message, /blocked queries, uncommitted SQL transactions/);
+  assert.doesNotMatch(queryFailure.message, /private-query|credentials|Cannot connect/);
+  const connectionError = Object.assign(new Error('private-connection-details'), { name: 'ConnectionError', code: 'ETIMEOUT' });
+  const connectionTimeout = connectionFailure(connectionError);
+  assert.equal(connectionTimeout.status, 503);
+  assert.match(connectionTimeout.message, /connection timed out/);
+  assert.doesNotMatch(connectionTimeout.message, /private-connection|accepted the connection/);
+  assert.equal(connectionFailure(queryFailure), queryFailure);
+});
+
 test('connection errors give useful messages without echoing credentials', () => {
   const error = connectionFailure(Object.assign(new Error('private-credential'), { code: 'ELOGIN' }));
   assert.equal(error.status, 503);

@@ -3,7 +3,7 @@ import express from 'express';
 import sql from 'mssql';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import database from './database.js';
+import database, { connectionFailure } from './database.js';
 import { mountAuthentication } from './auth.js';
 import { mountUserAdministration } from './users.js';
 
@@ -75,6 +75,7 @@ export function createApp(db = database, { serveClient = true } = {}) {
 
   app.get('/api/health', route(async (_req, res) => {
     await db.getPool();
+    await db.query('SELECT TOP (0) id FROM dbo.products');
     res.json({ status: 'ok', database: 'sqlserver' });
   }));
   mountAuthentication(app, db);
@@ -240,6 +241,7 @@ export function createApp(db = database, { serveClient = true } = {}) {
   app.use((error, _req, res, _next) => {
     console.error('Inventory API error:', error.code || error.number || error.name);
     if (error.status === 503) return fail(res, 503, error.message);
+    if (error.code === 'ETIMEOUT') return fail(res, 503, connectionFailure(error).message);
     if (error.type === 'entity.parse.failed') return fail(res, 400, 'Invalid JSON request.');
     if ([2628, 8152].includes(error.number)) return fail(res, 400, 'A value exceeds the configured database field length.');
     return fail(res, 500, 'An unexpected server error occurred.');

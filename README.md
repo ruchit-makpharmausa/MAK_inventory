@@ -112,6 +112,22 @@ Sign in as an administrator and select **Admin Panel** in the sidebar. Enter a d
 
 Only administrators can list or add users, including when calling `GET /api/users` or `POST /api/users` directly. Regular users retain inventory access without seeing the admin navigation. Administrator access is checked against the current database record on every API request. Account responses never include password hashes.
 
+### SQL Server unavailable or query timeout during sign-in
+
+A `503` response is a database availability problem, unlike `401 Invalid username or password`. Do not reset a password to fix a `503`. From the app server's project folder, run `npm run check:db` using the same `.env` as the running app. A successful TCP connection or `SELECT 1` does not prove inventory/login queries can run; those queries may still be blocked by a schema change or other transaction.
+
+The app distinguishes a connection timeout from a database **query timeout after connecting**. For query timeouts, have a database administrator run [scripts/diagnose-sql-blocking.sql](./scripts/diagnose-sql-blocking.sql) in SQL Server Management Studio. It reads only requests and open transactions for `mak_inventory`, including blocking session IDs, wait types, and session IDs with open transactions. It does not display SQL text or passwords, change accounts, end transactions, or terminate sessions. Server-state visibility permissions are required as noted in the script.
+
+If it identifies blocking (for example `LCK_M_SCH_S` while a schema-upgrade transaction remains open), the transaction's owner should review and explicitly finish it in the **original SSMS query tab**. This read-only check in that original tab shows whether it still owns a transaction:
+
+```sql
+SELECT @@TRANCOUNT AS openTransactions;
+```
+
+Choose whether to commit or roll back only after reviewing pending work with the database administrator. Do not blindly terminate sessions, rerun schema upgrades, increase timeouts, or disable certificate verification. If no blocker is found, investigate SQL Server load and the reported waits instead. Once queries are responsive, rerun `npm run check:db`, verify `/api/health`, then retry sign-in.
+
+The updated health endpoint performs a zero-row read against `dbo.products` on every request; it no longer treats a cached pool as proof the database is responsive. Deploy the updated backend and restart it to use this check and the more specific timeout messages. Account-check and password-reset commands also require a responsive database.
+
 ### Recover an account that cannot sign in
 
 `Invalid username or password` means the account was not found, is inactive, or the password did not match. It is not a firewall or browser-cache error. Website accounts in `dbo.app_users` are separate from the SQL Server credentials in `.env`. Granting administrator status does not set or reset an account's password.

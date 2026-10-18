@@ -124,6 +124,35 @@ test('invalid transactions are rejected before reaching the database', async () 
   });
 });
 
+test('health executes a zero-row inventory read instead of trusting a cached connection', async () => {
+  const db = mockDatabase([[]]);
+  await withApi(db, async (request) => {
+    const result = await request('/api/health');
+    assert.equal(result.status, 200);
+    assert.deepEqual(result.body, { status: 'ok', database: 'sqlserver' });
+    assert.equal(db.calls.length, 1);
+    assert.match(db.calls[0].statement, /SELECT TOP \(0\) id FROM dbo\.products/);
+  });
+});
+
+test('query timeouts return an actionable 503 for health, login and inventory without leaking details', async () => {
+  const error = Object.assign(new Error('private-connection-query-details'), { name: 'RequestError', code: 'ETIMEOUT' });
+  const db = mockDatabase([error, error, error]);
+  await withApi(db, async (request) => {
+    const results = [
+      await request('/api/health'),
+      await request('/api/auth/login', { username: 'test.user', password: 'unused-test-password' }),
+      await request('/api/products'),
+    ];
+    for (const result of results) {
+      assert.equal(result.status, 503);
+      assert.match(result.body.error, /accepted the connection.*query timed out/);
+      assert.doesNotMatch(result.body.error, /private-connection-query-details/);
+    }
+    assert.equal(db.calls.length, 3);
+  });
+});
+
 test('an unavailable SQL Server returns 503 without a local-database fallback', async () => {
   const error = Object.assign(new Error('SQL Server certificate verification failed.'), { status: 503 });
   const db = mockDatabase();

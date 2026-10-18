@@ -61,6 +61,12 @@ export async function verifyExistingSchema(pool) {
 
 export function connectionFailure(error) {
   if (error.status) return error;
+  if (error.code === 'ETIMEOUT') {
+    const message = error.name === 'RequestError'
+      ? 'SQL Server accepted the connection, but a database query timed out. Check for blocked queries, uncommitted SQL transactions, or an overloaded database.'
+      : 'The SQL Server connection timed out. Check the server address, port, and network connection.';
+    return Object.assign(unavailable(message), { code: error.code });
+  }
   if (error.code === 'ELOGIN') return unavailable('SQL Server rejected the login. Check the configured password and access to mak_inventory.');
   if (/certificate|self.signed|altname|hostname/i.test(error.message || '')) {
     return unavailable('SQL Server certificate verification failed. Configure a trusted certificate or the agreed server-certificate setting in .env.');

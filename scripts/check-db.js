@@ -1,4 +1,4 @@
-import { getPool, closePool } from '../server/database.js';
+import { getPool, closePool, connectionFailure } from '../server/database.js';
 
 try {
   const pool = await getPool();
@@ -12,7 +12,7 @@ try {
   console.log('Connected to the existing SQL Server database with encryption required.');
   console.log(JSON.stringify(recordset[0], null, 2));
 } catch (error) {
-  console.error(error.message);
+  console.error(error.code === 'ETIMEOUT' ? connectionFailure(error).message : error.message);
   process.exitCode = 1;
 } finally {
   await closePool();

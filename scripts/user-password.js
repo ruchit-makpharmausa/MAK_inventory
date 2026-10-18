@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sql from 'mssql';
-import database, { closePool } from '../server/database.js';
+import database, { closePool, connectionFailure } from '../server/database.js';
 import { hashPassword, validPassword, validPasswordHash, validUsername, verifyPassword } from '../server/passwords.js';
 
 function normalizeUsername(username) {
@@ -73,6 +73,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   } catch (error) {
     if (error.number === 229) console.error('Account checks require SELECT on dbo.app_users. Password reset also requires UPDATE on its password_hash column and DELETE on dbo.user_sessions. Ask a database administrator to run recovery with an authorized database login.');
     else if ([207, 208].includes(error.number)) console.error('Login tables are missing or incomplete in the configured database. Check the database name and scripts/login-tables.sql.');
+    else if (error.code === 'ETIMEOUT') console.error(connectionFailure(error).message);
     else console.error(error.status === 503 || !error.code && !error.number ? error.message : 'Account recovery failed. Check the database connection and permissions.');
     process.exitCode = 1;
   } finally {
