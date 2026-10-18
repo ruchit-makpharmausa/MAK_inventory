@@ -10,6 +10,7 @@
     "build": "vite build",
     "start": "node server/index.js --production",
     "check:db": "node scripts/check-db.js",
+    "create:user": "node scripts/create-user.js",
     "test": "node --test tests/*.test.js"
   },
   "dependencies": {

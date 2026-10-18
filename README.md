@@ -1,4 +1,4 @@
-﻿# MAK Inventory Management System
+# MAK Inventory Management System
 
 React + Vite frontend with a Node.js/Express backend connected to your existing Microsoft SQL Server database. The app does not install a database, create tables, seed records, or migrate data automatically.
 
@@ -83,6 +83,25 @@ New-NetFirewallRule -DisplayName "MAK Inventory TCP 567" -Direction Inbound -Act
 ```
 
 The website uses port `567`. SQL Server continues to use port `1433` with certificate verification enabled. These steps do not create or change database objects.
+
+## Sign-in setup
+
+The home page requires a username and password before opening the inventory dashboard. To create the login tables, select the existing inventory database in SQL Server Management Studio and run [scripts/login-tables.sql](./scripts/login-tables.sql). This separate SQL script creates only `dbo.app_users` and `dbo.user_sessions`; it does not create a database or change inventory data.
+
+Create the first account from PowerShell in the app folder. Run the commands one line at a time; the password must be at least 12 characters:
+
+```powershell
+$env:APP_USER_NAME = "your.username"
+$env:APP_USER_DISPLAY_NAME = "Your Name"
+$securePassword = Read-Host "Choose a password (12-256 characters)" -AsSecureString
+$env:APP_USER_PASSWORD = [System.Net.NetworkCredential]::new("", $securePassword).Password
+try { npm.cmd run create:user } finally {
+  Remove-Variable securePassword -ErrorAction SilentlyContinue
+  Remove-Item Env:APP_USER_NAME, Env:APP_USER_DISPLAY_NAME, Env:APP_USER_PASSWORD -ErrorAction SilentlyContinue
+}
+```
+
+The account command stores a salted password hash, not the plaintext password. Run it once per account. Sign-in sessions are stored in SQL Server and expire after eight hours. The app's SQL login needs the permissions listed at the end of `scripts/login-tables.sql`.
 
 ### Publish updates from the development PC
 

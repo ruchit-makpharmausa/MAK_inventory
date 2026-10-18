@@ -11,6 +11,9 @@ function mockDatabase(responses = []) {
   return {
     calls, token,
     async query(statement, parameters = {}, executor) {
+      if (statement.includes('FROM dbo.user_sessions s JOIN dbo.app_users u')) {
+        return { recordset: [{ id: 1, username: 'test.user', displayName: 'Test User' }] };
+      }
       calls.push({ statement, parameters, executor });
       assert.ok(responses.length > 0, `Unexpected query: ${statement}`);
       const response = responses.shift();
@@ -25,10 +28,13 @@ function mockDatabase(responses = []) {
 async function withApi(db, run) {
   const server = createApp(db, { serveClient: false }).listen(0, '127.0.0.1');
   await new Promise((resolve) => server.once('listening', resolve));
-  const request = async (url, body, method = 'POST') => {
-    const response = await fetch(`http://127.0.0.1:${server.address().port}${url}`, body === undefined ? undefined : {
-      method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-    });
+  const request = async (url, body, method = body === undefined ? 'GET' : 'POST') => {
+    const options = { method, headers: { Cookie: `mak_inventory_session=${'a'.repeat(64)}` } };
+    if (body !== undefined) {
+      options.headers['Content-Type'] = 'application/json';
+      options.body = JSON.stringify(body);
+    }
+    const response = await fetch(`http://127.0.0.1:${server.address().port}${url}`, options);
     return { status: response.status, body: await response.json() };
   };
   try { await run(request); }

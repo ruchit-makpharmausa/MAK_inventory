@@ -34,6 +34,10 @@ async function api(url, options) {
 }
 
 function App() {
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authError, setAuthError] = useState('');
+  const [authBusy, setAuthBusy] = useState(false);
   const [page, setPage] = useState('dashboard');
   const [products, setProducts] = useState([]);
   const [allProducts, setAllProducts] = useState([]);
@@ -45,6 +49,43 @@ function App() {
   const [editingProduct, setEditingProduct] = useState(null);
   const [message, setMessage] = useState(null);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api('/api/auth/session')
+      .then(({ user: currentUser }) => setUser(currentUser))
+      .catch((error) => setAuthError(error.message))
+      .finally(() => setAuthLoading(false));
+  }, []);
+
+  const signIn = async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setAuthBusy(true);
+    setAuthError('');
+    try {
+      const result = await api('/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ username: form.get('username'), password: form.get('password') }),
+      });
+      setUser(result.user);
+    } catch (error) {
+      setAuthError(error.message);
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const signOut = async () => {
+    try {
+      await api('/api/auth/logout', { method: 'POST' });
+      setUser(null);
+      setPage('dashboard');
+      setMessage(null);
+      setAuthError('');
+    } catch (error) {
+      setMessage({ kind: 'error', text: error.message });
+    }
+  };
 
   const loadProducts = useCallback(async () => {
     const params = new URLSearchParams({ search, typeId: typeFilter });
@@ -62,12 +103,14 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (!user) return;
     loadProducts().catch((error) => setMessage({ kind: 'error', text: error.message }));
-  }, [loadProducts]);
+  }, [loadProducts, user]);
 
   useEffect(() => {
+    if (!user) return;
     loadBase().catch((error) => setMessage({ kind: 'error', text: error.message }));
-  }, [loadBase]);
+  }, [loadBase, user]);
 
   const refresh = useCallback(async () => {
     await Promise.all([loadProducts(), loadBase()]);
@@ -85,11 +128,11 @@ function App() {
   };
 
   useEffect(() => {
-    if (page !== 'history' || !selectedProductId) return;
+    if (!user || page !== 'history' || !selectedProductId) return;
     api(`/api/products/${selectedProductId}/history`)
       .then(setHistory)
       .catch((error) => setMessage({ kind: 'error', text: error.message }));
-  }, [page, selectedProductId]);
+  }, [page, selectedProductId, user]);
 
   const onTransactionSaved = async (kind) => {
     setMessage({ kind: 'success', text: `${kind === 'receiving' ? 'Receiving' : 'Usage'} transaction saved.` });
@@ -168,6 +211,9 @@ function App() {
   const pageTitle = navItems.find(([key]) => key === page)?.[1] || 'Dashboard';
   const editingUnit = unitOption(editingProduct?.unit);
 
+  if (authLoading) return <div className="auth-loading" role="status">Checking your sign-in…</div>;
+  if (!user) return <LoginPage error={authError} busy={authBusy} onSubmit={signIn} />;
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -191,7 +237,10 @@ function App() {
         <header className="topbar">
           <div className="mobile-brand">MAK <span>Inventory</span></div>
           <div className="breadcrumb">Workspace <span>/</span> <strong>{pageTitle}</strong></div>
-          <div className="company-chip">MAK Pharma USA LLC</div>
+          <div className="topbar-account">
+            <div className="company-chip">{user.displayName || user.username}</div>
+            <button className="button secondary signout-button" onClick={signOut}>Sign out</button>
+          </div>
         </header>
         <div className="content">
           {message && <div className={`notice ${message.kind}`} role="status">
@@ -258,6 +307,33 @@ function App() {
       </div>}
     </div>
   );
+}
+
+function LoginPage({ error, busy, onSubmit }) {
+  return <main className="login-page">
+    <section className="login-card" aria-labelledby="login-title">
+      <div className="login-brand">
+        <div className="brand-mark">M</div>
+        <div><strong>MAK Pharma</strong><span>Inventory Management</span></div>
+      </div>
+      <div className="eyebrow">SECURE WORKSPACE</div>
+      <h1 id="login-title">Sign in to your account</h1>
+      <p className="login-subtitle">Enter your account details to open the inventory dashboard.</p>
+      {error && <div className="login-error" role="alert">{error}</div>}
+      <form onSubmit={onSubmit}>
+        <label htmlFor="login-username">Username</label>
+        <input id="login-username" name="username" type="text" autoComplete="username"
+          required maxLength={100} autoFocus />
+        <label htmlFor="login-password">Password</label>
+        <input id="login-password" name="password" type="password" autoComplete="current-password"
+          required maxLength={256} />
+        <button className="button primary login-button" disabled={busy}>
+          {busy ? 'Signing in…' : 'Sign in'}
+        </button>
+      </form>
+      <div className="login-footer">MAK Pharma USA LLC · Inventory Management</div>
+    </section>
+  </main>;
 }
 
 function PageHeading({ eyebrow, title, subtitle, action }) {

@@ -7,7 +7,23 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     server: {
       proxy: {
-        '/api': `http://127.0.0.1:${port}`,
+        '/api': {
+          target: `http://127.0.0.1:${port}`,
+          configure: (proxy) => {
+            proxy.on('proxyReq', (proxyRequest, request) => {
+              if (!request.headers.origin || !request.headers.host) return;
+              let origin;
+              try {
+                origin = new URL(request.headers.origin);
+              } catch {
+                return;
+              }
+              if (['http:', 'https:'].includes(origin.protocol) && origin.host === request.headers.host) {
+                proxyRequest.removeHeader('origin');
+              }
+            });
+          },
+        },
       },
     },
   };
