@@ -15,7 +15,7 @@ SQLSERVER_PASSWORD=
 SQLSERVER_CA_FILE=./scripts/MAKPHARMA-SQL.pem
 SQLSERVER_TRUST_SERVER_CERTIFICATE=false
 SQLSERVER_TLS_SERVER_NAME=MAKPHARMA
-PORT=3001
+PORT=567
 HOST=0.0.0.0
 ```
 
@@ -41,7 +41,7 @@ Select the generated certificate in SQL Server Configuration Manager and restart
 
 ## Run the app under one IP and port
 
-Requires Node.js 20 or later.
+Install [Node.js LTS](https://nodejs.org/en/download) and [Git for Windows](https://git-scm.com/install/windows) on the server PC. Reopen PowerShell after installing them.
 
 ```powershell
 npm install
@@ -50,9 +50,62 @@ npm run build
 npm start
 ```
 
-Open `http://localhost:3001` on this PC. Other computers use `http://<this-PC-IP>:3001`. Both the website and `/api` are served from that address. `SQLSERVER_HOST` identifies the database server; the website address identifies whichever PC runs Node.js.
+The intended server address is **http://192.168.1.114:567**. Run the app on the PC that owns `192.168.1.114` to serve both the website and `/api` at that address. `HOST=0.0.0.0` accepts network connections on port `567`; setting the database address alone does not move the website to that PC.
 
-For development, `npm run dev` starts the Vite frontend on port 5173 with API requests forwarded to port 3001. Use `npm start` to serve the built website and API together.
+### Start on the server PC (192.168.1.114)
+
+1. Verify that the server PC has IP address `192.168.1.114` using `ipconfig`. Keep this address assigned to that PC through your network's existing static address or DHCP reservation.
+2. For the first installation, open PowerShell on that PC and clone the repository into a new folder:
+
+   ```powershell
+   git clone https://github.com/ruchit-makpharmausa/MAK_inventory.git C:\MAKInventory
+   Set-Location C:\MAKInventory
+   if (-not (Test-Path -LiteralPath .env)) { Copy-Item .env.example .env }
+   notepad .env
+   ```
+
+   Enter the actual SQL password in the server's `.env`, save it, and close Notepad. Keep `PORT=567`, `HOST=0.0.0.0`, and the SQL Server and certificate settings shown above. The public certificate files are included in `scripts/`. Each PC keeps its own `.env`; it is excluded from Git.
+3. Run:
+
+   ```powershell
+   npm ci
+   npm run check:db
+   npm run build
+   npm start
+   ```
+
+4. Keep that PowerShell window open while the app is running. In a browser on the server PC, verify `http://localhost:567/api/health`; a working database connection returns `{"status":"ok","database":"sqlserver"}`. Then open `http://192.168.1.114:567` from another computer on the network.
+
+If Windows Firewall blocks access from other computers, run this once in an Administrator PowerShell on the server PC:
+
+```powershell
+New-NetFirewallRule -DisplayName "MAK Inventory TCP 567" -Direction Inbound -Action Allow -Protocol TCP -LocalAddress 192.168.1.114 -LocalPort 567 -Profile Private,Domain
+```
+
+The website uses port `567`. SQL Server continues to use port `1433` with certificate verification enabled. These steps do not create or change database objects.
+
+### Publish updates from the development PC
+
+Make code changes on the development PC and push them to the repository's `main` branch. After each push, update the running server as follows:
+
+1. On the server PC, press **Ctrl+C** in the PowerShell window running the app. Updating briefly interrupts the website.
+2. In that window, run:
+
+   ```powershell
+   Set-Location C:\MAKInventory
+   git pull --ff-only origin main
+   npm ci
+   npm run check:db
+   npm run build
+   npm start
+   ```
+
+   Run the commands one at a time and continue only when each command succeeds. If Git reports local edits or a merge conflict, resolve those edits before continuing.
+3. Verify `http://192.168.1.114:567/api/health`, then refresh the website. Git updates the code while the server's ignored `.env` retains its password and settings. Application updates leave the existing SQL Server data in place.
+
+With this manual startup method, start the app again with `Set-Location C:\MAKInventory` followed by `npm start` after a server restart. The server PC must remain powered on, awake, and connected to the network for the website to be available.
+
+For development, `npm run dev` starts the Vite frontend on port `5173` and forwards API requests to the backend port configured by `PORT` (default `567`). Use `npm start` to serve the built website and API together.
 
 ## Existing tables
 
