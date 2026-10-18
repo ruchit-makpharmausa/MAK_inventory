@@ -142,7 +142,7 @@ test('session deletion failure rolls back the password update', async () => {
   assert.deepEqual(db.sessionIds, [7, 7, 8]);
 });
 
-test('login recovers after a reset, rejects the old password, and invalidates the previous session', async () => {
+test('login recovers with a six-character reset password and invalidates the previous password and session', async () => {
   const db = recoveryDatabase(account({ passwordHash: await hashPassword('original-password-123') }));
   const server = createApp(db, { serveClient: false }).listen(0, '127.0.0.1');
   await new Promise((resolve) => server.once('listening', resolve));
@@ -152,16 +152,16 @@ test('login recovers after a reset, rejects the old password, and invalidates th
     body: JSON.stringify({ username: 'test.user', password }),
   });
   try {
-    const failed = await login('replacement-password-123');
+    const failed = await login('Six!42');
     assert.equal(failed.status, 401);
     assert.equal((await failed.json()).error, 'Invalid username or password.');
     const original = await login('original-password-123');
     assert.equal(original.status, 200);
     const oldCookie = original.headers.get('set-cookie').split(';')[0];
-    await resetAccountPassword(db, 'test.user', 'replacement-password-123');
+    await resetAccountPassword(db, 'test.user', 'Six!42');
     assert.equal((await fetch(`${url}/api/products`, { headers: { Cookie: oldCookie } })).status, 401);
     assert.equal((await login('original-password-123')).status, 401);
-    const recovered = await login('replacement-password-123');
+    const recovered = await login('Six!42');
     assert.equal(recovered.status, 200);
     assert.equal((await recovered.json()).user.username, 'test.user');
     const newCookie = recovered.headers.get('set-cookie').split(';')[0];

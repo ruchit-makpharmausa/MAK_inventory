@@ -10,7 +10,7 @@ delete process.env.APP_USER_PASSWORD;
 
 try {
   if (!validUsername(username)) throw new Error('APP_USER_NAME must be 3–100 characters: letters, numbers, dot, underscore, @ or hyphen.');
-  if (!validPassword(password)) throw new Error('APP_USER_PASSWORD must contain between 12 and 256 characters.');
+  if (!validPassword(password)) throw new Error('APP_USER_PASSWORD must contain between 6 and 256 characters.');
   if (displayName.length > 150) throw new Error('APP_USER_DISPLAY_NAME must contain at most 150 characters.');
   if (!['user', 'admin'].includes(role)) throw new Error('APP_USER_ROLE must be user or admin.');
   const passwordHash = await hashPassword(password);

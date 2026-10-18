@@ -76,12 +76,12 @@ export default function AdminPanel({ api }) {
               <span className="field-help" id="role-help">Administrators can view and add users. Both roles can use inventory.</span>
             </label>
             <label>Password
-              <input name="password" type="password" required minLength={12} maxLength={256}
+              <input name="password" type="password" required minLength={6} maxLength={256}
                 autoComplete="new-password" aria-describedby="password-help" />
-              <span className="field-help" id="password-help">Use 12–256 characters. Share it securely with the account owner.</span>
+              <span className="field-help" id="password-help">Use 6–256 characters. Share it securely with the account owner.</span>
             </label>
             <label>Confirm password
-              <input name="confirmPassword" type="password" required minLength={12} maxLength={256} autoComplete="new-password" />
+              <input name="confirmPassword" type="password" required minLength={6} maxLength={256} autoComplete="new-password" />
             </label>
             <button className="button primary submit-button" disabled={busy}>{busy ? 'Adding user…' : 'Add user'}</button>
           </fieldset>

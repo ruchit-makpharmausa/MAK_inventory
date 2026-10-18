@@ -35,7 +35,7 @@ export async function checkAccount(db, username, password) {
 
 export async function resetAccountPassword(db, username, password) {
   const normalized = normalizeUsername(username);
-  if (!validPassword(password)) throw new Error('APP_USER_PASSWORD must contain between 12 and 256 characters.');
+  if (!validPassword(password)) throw new Error('APP_USER_PASSWORD must contain between 6 and 256 characters.');
   const passwordHash = await hashPassword(password);
   return db.transaction(async (executor) => {
     const result = await db.query(`

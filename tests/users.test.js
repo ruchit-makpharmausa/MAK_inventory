@@ -81,6 +81,19 @@ test('administrator creates a normalized account with a salted hash that can sig
   });
 });
 
+test('six-character passwords can be used for new accounts and sign-in', async () => {
+  await withApi(async ({ request, login }) => {
+    const cookie = await login();
+    const rejected = await request('/api/users', { cookie, body: { ...account, password: 'abcde' } });
+    assert.equal(rejected.status, 400);
+    assert.equal(rejected.body.error, 'Password must contain between 6 and 256 characters.');
+    const created = await request('/api/users', { cookie, body: { ...account, password: 'Six!42' } });
+    assert.equal(created.status, 201);
+    const newCookie = await login('new.user', 'Six!42');
+    assert.equal((await request('/api/products', { cookie: newCookie })).status, 200);
+  });
+});
+
 test('administrator can explicitly create another administrator', async () => {
   await withApi(async ({ request, login }) => {
     const cookie = await login();

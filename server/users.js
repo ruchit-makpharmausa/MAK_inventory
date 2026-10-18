@@ -25,7 +25,7 @@ export function mountUserAdministration(app, db) {
       return res.status(400).json({ error: 'Display name must contain between 1 and 150 characters.' });
     }
     if (!validPassword(password)) {
-      return res.status(400).json({ error: 'Password must contain between 12 and 256 characters.' });
+      return res.status(400).json({ error: 'Password must contain between 6 and 256 characters.' });
     }
     if (typeof isAdmin !== 'boolean') {
       return res.status(400).json({ error: 'Choose a valid user role.' });
