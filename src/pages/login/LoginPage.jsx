@@ -3,7 +3,7 @@ export default function LoginPage({ error, busy, onSubmit }) {
     <section className="login-card" aria-labelledby="login-title">
       <div className="login-brand">
         <div className="brand-mark">M</div>
-        <div><strong>MAK Pharma</strong><span>Inventory Management</span></div>
+        <div><strong>MAK Pharma USA</strong><span>Inventory Management</span></div>
       </div>
       <div className="eyebrow">SECURE WORKSPACE</div>
       <h1 id="login-title">Sign in to your account</h1>
@@ -20,7 +20,7 @@ export default function LoginPage({ error, busy, onSubmit }) {
           {busy ? 'Signing in…' : 'Sign in'}
         </button>
       </form>
-      <div className="login-footer">MAK Pharma USA LLC · Inventory Management</div>
+      <div className="login-footer">MAK Pharma USA · Inventory Management</div>
     </section>
   </main>;
 }
