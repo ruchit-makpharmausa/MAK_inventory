@@ -58,7 +58,10 @@ function transactionInputs(body, kind) {
   };
 }
 
-export function createApp(db = database, { serveClient = true } = {}) {
+export function createApp(db = database, {
+  serveClient = true,
+  clientDirectory = fileURLToPath(new URL('../dist/', import.meta.url)),
+} = {}) {
   const app = express();
   app.use(cors());
   app.use(express.json());
@@ -233,7 +236,6 @@ export function createApp(db = database, { serveClient = true } = {}) {
   app.use('/api', (_req, res) => fail(res, 404, 'API endpoint not found.'));
   if (serveClient) {
     if (process.env.NODE_ENV === 'production' || process.argv.includes('--production')) {
-      const clientDirectory = fileURLToPath(new URL('../dist/', import.meta.url));
       app.use(express.static(clientDirectory));
       app.get('*', (_req, res) => res.sendFile(path.join(clientDirectory, 'index.html')));
     } else app.get('/', (_req, res) => res.redirect('http://localhost:5173/'));

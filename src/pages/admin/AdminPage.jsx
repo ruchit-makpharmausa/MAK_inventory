@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-export default function AdminPanel({ api }) {
+export default function AdminPage({ api }) {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');

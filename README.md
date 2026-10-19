@@ -201,6 +201,45 @@ With this manual startup method, start the app again with `Set-Location C:\MAKIn
 
 For development, `npm run dev` starts the Vite frontend on port `5173` and forwards API requests to the backend port configured by `PORT` (default `567`). Use `npm start` to serve the built website and API together.
 
+## Page URLs and frontend folders
+
+The app uses browser URL routing on the same host and port. For example, `http://localhost:567/dashboard` and `http://192.168.1.114:567/dashboard` open the same dashboard on their respective app servers; nothing is hardcoded to either hostname.
+
+| URL path | Page module | Access |
+| --- | --- | --- |
+| `/login` | [LoginPage](./src/pages/login/LoginPage.jsx) | Sign in; signed-in users return to the requested page or dashboard |
+| `/dashboard` | [DashboardPage](./src/pages/dashboard/DashboardPage.jsx) | Signed-in users |
+| `/products` | [ProductsPage](./src/pages/products/ProductsPage.jsx) | Signed-in users |
+| `/receiving` | [ReceivingPage](./src/pages/receiving/ReceivingPage.jsx) | Signed-in users |
+| `/usage` | [UsagePage](./src/pages/usage/UsagePage.jsx) | Signed-in users |
+| `/inv_history` | [InventoryHistoryPage](./src/pages/history/InventoryHistoryPage.jsx) | Signed-in users |
+| `/admin` | [AdminPage](./src/pages/admin/AdminPage.jsx) | Administrators only |
+
+The root `/` opens the dashboard after sign-in. Opening a protected link while signed out redirects to `/login`, then returns to that page after successful authentication. Non-administrators who open `/admin` return to `/dashboard`. Unknown page URLs show a not-found page. The sidebar uses real links, so opening a page in a new tab and browser Back/Forward work normally.
+
+Product history selection is saved in the URL, for example `/inv_history?productId=17`, and survives refreshes and shared links. `/history` is an alias that redirects to `/inv_history`, preserving its query parameters. The production Express server serves the React app for direct page requests and refreshes, while `/api` continues to use its existing authentication and JSON responses.
+
+Frontend organization:
+
+```text
+src/
+  App.jsx                 Shared application state and route definitions
+  main.jsx                BrowserRouter entry point
+  pages/
+    login/LoginPage.jsx
+    dashboard/DashboardPage.jsx
+    products/ProductsPage.jsx
+    receiving/ReceivingPage.jsx
+    usage/UsagePage.jsx
+    history/InventoryHistoryPage.jsx
+    admin/AdminPage.jsx
+    not-found/NotFoundPage.jsx
+  components/             Shared layout, route guard, tables, modal and transaction form
+  lib/                    API requests, formatting, CSV/Excel export and navigation helpers
+```
+
+For development, use the same paths on Vite's port, such as `http://localhost:5173/products`. For deployment, update the full project on the server PC, run `npm ci` and `npm run build`, then restart with `npm start`; deploying only the old built frontend will not add these routes. Existing inventory operations, authentication, and the six-character password minimum are unchanged.
+
 ## Existing tables
 
 The app checks for these existing tables in schema `dbo`:
@@ -219,9 +258,13 @@ A connection failure or missing column returns an explicit error; the app never 
 - Product Master saves Item Code, MAK Item Code, Comment, and Unit (Pcs or kgs).
 - Search supports product names and both item codes.
 - Stock is calculated from receiving minus usage transactions.
+- Receiving labels its optional reference field **MAK RN Number**, including the receiving history column. It uses the existing `materialLotNumber` API field and database column. Usage history shows only Date, MAK lot number, Used quantity, and Remarks. Both history tables share column widths and right-align quantity headers with their values. The usage entry form and backend retain material-lot tracking.
 - Receiving and usage acquire a SQL Server update lock on the product within a transaction to coordinate concurrent requests.
 - Lot-tracked inventory requires a material lot and checks its available balance.
-- CSV exports include the product fields and transaction history.
+- Dashboard **Export Excel** downloads `mak-inventory-summary.xlsx` with separate **Sleeve**, **IFC**, and **Bulk** worksheets. Each sheet contains **Product Name, Item Code, MAK Item Code, Total Received, Total Used, Available**, in that order. Headers are frozen and filterable, codes stay as text (including leading zeros), and quantities remain numeric and right-aligned. Empty categories retain their header-only sheets. Other product types get additional worksheets so no products are omitted; missing types go to Other. Type grouping ignores case and surrounding spaces, and Sleeves is grouped with Sleeve. Dashboard search/type filters do not limit the export; it includes all inventory products, as before. Excel generation loads only when exporting. CSV cannot contain multiple sheets, so this dashboard download uses `.xlsx` instead.
+- For an individual product, Inventory History **Export Excel** downloads `inventory-history-<item-code>.xlsx`. Its single **Product History** worksheet matches the ledger layout **Date, Item/Description, Qty, Used Qty, Used Against(MAK Lot No)**. Receiving rows show the product description and received quantity in bold; usage rows show consumed quantity and the MAK lot number with a single `#` prefix (for example `#M12345`) in red. Existing `#` or legacy `Lot #` prefixes are normalized for display only; stored lot identifiers and leading zeros remain unchanged. All transactions retain their actual dates and are ordered oldest first; same-day receipts precede usage. Dates are real Excel dates displayed as `m/d/yy`, and quantities remain numeric and right-aligned. MAK RN Numbers and transaction remarks are retained as cell notes; item codes and units are noted in the headers. No stock values are changed or inferred from font color. Empty histories export a header-only sheet.
+- Inventory History also offers **Export PDF** beside Export Excel for the selected product. The downloadable landscape PDF uses the same five ledger columns, transaction dates, bold receiving rows, red usage values, and `#M12345` lot formatting. It includes the product name, item codes and unit; MAK RN Numbers and remarks appear in a Transaction Notes section. Long histories span pages with repeated headers and page numbers. PDF generation runs locally in the browser and its libraries load only when PDF export is selected. Both export buttons are disabled while a download is generated and become available again after success or failure. Existing Excel exports remain available.
+- Product Master retains its existing CSV download action.
 
 ## Validation
 

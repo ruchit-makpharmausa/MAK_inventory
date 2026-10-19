@@ -26,6 +26,7 @@ button { cursor: pointer; }
 .nav-label { padding: 0 12px; margin: 0 0 11px; }
 .sidebar nav { display: grid; gap: 5px; }
 .nav-item { border: 0; text-align: left; border-radius: 7px; color: #bdc9d6; background: transparent; padding: 11px 12px; font-size: 12px; display: flex; align-items: center; gap: 12px; transition: background .15s, color .15s; }
+.nav-item, a.button { text-decoration: none; }
 .nav-item:hover { color: #fff; background: #1a3a60; }
 .nav-item.active { color: #fff; background: #24496f; font-weight: 600; box-shadow: inset 3px 0 #8eb6d7; }
 .nav-icon { width: 17px; font-size: 16px; text-align: center; }
@@ -136,6 +137,10 @@ textarea { resize: vertical; min-height: 61px; }
 .balance-banner strong { display: block; color: #176d5b; font: 700 22px 'Segoe UI', sans-serif; margin-top: 4px; }
 .balance-banner small { font: 500 11px 'Segoe UI', sans-serif; }
 .history-panel .empty-state { min-height: 98px; }
+.history-table { table-layout: fixed; }
+.history-date-column, .history-remarks-column { width: 20%; }
+.history-reference-column, .history-quantity-column { width: 30%; }
+.history-table .history-reference, .history-table .history-remarks { white-space: normal; overflow-wrap: anywhere; padding-top: 10px; padding-bottom: 10px; }
 .modal-backdrop { position: fixed; inset: 0; background: #12263c77; display: grid; place-items: center; z-index: 5; padding: 18px; }
 .modal { background: #fff; width: min(500px, 100%); max-height: calc(100vh - 36px); overflow-y: auto; border-radius: 9px; box-shadow: 0 20px 70px #0e243b44; padding: 23px; }
 .modal-heading { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
