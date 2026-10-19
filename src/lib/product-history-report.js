@@ -31,12 +31,14 @@ export function productHistoryEntries(history) {
       const amount = numericQuantity(row.quantity);
       return {
         date, receiving,
+        releaseNumber: receiving ? String(row.makReleaseNumber ?? '') : '',
         description: receiving ? String(history.product.name ?? '') : '',
         receivedQuantity: receiving ? amount : null,
         usedQuantity: receiving ? null : amount,
         usedAgainst: receiving ? '' : usedAgainst(row.makLotNumber),
         notes: [
-          receiving && row.materialLotNumber ? `MAK RN Number: ${row.materialLotNumber}` : '',
+          receiving && row.makReleaseNumber ? `MAK Release Number: ${row.makReleaseNumber}` : '',
+          row.materialLotNumber ? `Material lot number: ${row.materialLotNumber}` : '',
           row.remarks ? `Remarks: ${row.remarks}` : '',
         ].filter(Boolean).join('\n'),
       };

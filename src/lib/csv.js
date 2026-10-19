@@ -1,5 +1,5 @@
 export const inventoryHistoryRows = (history) => [
-  ...history.receiving.map((row) => ['Receiving', row.date, row.materialLotNumber, '', row.quantity, row.remarks]),
+  ...history.receiving.map((row) => ['Receiving', row.date, row.makReleaseNumber, '', row.quantity, row.remarks]),
   ...history.usage.map((row) => ['Usage', row.date, '', row.makLotNumber, row.quantity, row.remarks]),
 ];
 

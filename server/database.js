@@ -8,7 +8,7 @@ dotenv.config({ path: fileURLToPath(new URL('../.env', import.meta.url)), quiet:
 export const expectedColumns = {
   product_types: ['id', 'name', 'created_at'],
   products: ['id', 'product_type_id', 'name', 'item_code', 'mak_item_code', 'unit', 'comment', 'created_at', 'updated_at'],
-  receiving_transactions: ['id', 'product_id', 'receiving_date', 'quantity', 'material_lot_number', 'remarks', 'created_at'],
+  receiving_transactions: ['id', 'product_id', 'receiving_date', 'quantity', 'material_lot_number', 'mak_release_number', 'remarks', 'created_at'],
   usage_transactions: ['id', 'product_id', 'usage_date', 'quantity', 'material_lot_number', 'mak_lot_number', 'remarks', 'created_at'],
 };
 

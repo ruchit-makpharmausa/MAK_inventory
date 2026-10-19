@@ -14,14 +14,15 @@ export default function HistoryTable({ title, subtitle, rows, receiving = false 
         </colgroup>
         <thead><tr>
           <th scope="col">Date</th>
-          <th scope="col">{receiving ? 'MAK RN Number' : 'MAK lot number'}</th>
+          <th scope="col">{receiving ? 'MAK Release Number' : 'MAK lot number'}</th>
           <th scope="col" className="numeric">{receiving ? 'Received quantity' : 'Used quantity'}</th>
           <th scope="col">Remarks</th>
         </tr></thead>
         <tbody>{rows.map((row) => <tr key={row.id}>
           <td>{dateLabel(row.date)}</td>
           <td className={`history-reference${receiving ? '' : ' code-cell'}`}>
-            {(receiving ? row.materialLotNumber : row.makLotNumber) || '—'}
+            {(receiving ? row.makReleaseNumber : row.makLotNumber) || '—'}
+            {row.materialLotNumber && <div className="muted-label">Material lot number: {row.materialLotNumber}</div>}
           </td>
           <td className="numeric">{quantity(row.quantity)}</td>
           <td className="history-remarks">{row.remarks || '—'}</td>

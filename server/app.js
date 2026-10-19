@@ -45,7 +45,9 @@ function transactionError(body, kind) {
   if (typeof body.quantity !== 'number' || !Number.isFinite(body.quantity) || body.quantity <= 0) return 'Quantity must be greater than zero.';
   if (kind === 'usage' && !requiredText(body.makLotNumber)) return 'MAK lot number is required.';
   if (!optionalText(body.materialLotNumber) || !optionalText(body.remarks)) return 'Material lot number and remarks must be text.';
+  if (kind === 'receiving' && !optionalText(body.makReleaseNumber)) return 'MAK Release Number must be text.';
   if (tooLong(body.materialLotNumber, 255) || tooLong(body.makLotNumber, 255)) return 'Lot numbers must be 255 characters or fewer.';
+  if (kind === 'receiving' && tooLong(body.makReleaseNumber, 255)) return 'MAK Release Number must be 255 characters or fewer.';
   return null;
 }
 function transactionInputs(body, kind) {
@@ -54,7 +56,8 @@ function transactionInputs(body, kind) {
     date: [sql.Date, new Date(`${body[kind === 'receiving' ? 'receivingDate' : 'usageDate']}T00:00:00Z`)],
     quantity: [sql.Float, body.quantity], materialLotNumber: [sql.NVarChar(255), body.materialLotNumber?.trim() || null],
     remarks: [sql.NVarChar(sql.MAX), body.remarks?.trim() || null],
-    ...(kind === 'usage' ? { makLotNumber: [sql.NVarChar(255), body.makLotNumber.trim()] } : {}),
+    ...(kind === 'usage' ? { makLotNumber: [sql.NVarChar(255), body.makLotNumber.trim()] }
+      : { makReleaseNumber: [sql.NVarChar(255), body.makReleaseNumber?.trim() || null] }),
   };
 }
 
@@ -125,7 +128,7 @@ export function createApp(db = database, {
       `, productInputs(req.body));
       res.status(201).json(await getProduct(result.recordset[0].id));
     } catch (error) {
-      if (duplicate(error)) return fail(res, 409, 'That item code already exists.');
+      if (duplicate(error)) return fail(res, 409, 'That item code already exists for the selected product type.');
       if (error.number === 547) return fail(res, 400, 'Select a valid product type.');
       throw error;
     }
@@ -144,7 +147,7 @@ export function createApp(db = database, {
       if (!result.recordset[0].matched) return fail(res, 404, 'Product not found.');
       res.json(await getProduct(req.params.id));
     } catch (error) {
-      if (duplicate(error)) return fail(res, 409, 'That item code already exists.');
+      if (duplicate(error)) return fail(res, 409, 'That item code already exists for the selected product type.');
       if (error.number === 547) return fail(res, 400, 'Select a valid product type.');
       throw error;
     }
@@ -157,7 +160,7 @@ export function createApp(db = database, {
     const result = await db.query(`
       SELECT t.id, t.product_id AS productId, CONVERT(char(10), t.${dateColumn}, 23) AS [date],
              t.quantity, t.material_lot_number AS materialLotNumber,
-             ${kind === 'usage' ? 't.mak_lot_number AS makLotNumber,' : ''}
+             ${kind === 'usage' ? 't.mak_lot_number AS makLotNumber,' : 't.mak_release_number AS makReleaseNumber,'}
              t.remarks, p.name AS productName, p.item_code AS itemCode, pt.name AS productType, p.unit
       FROM dbo.${table} t JOIN dbo.products p ON p.id = t.product_id
       JOIN dbo.product_types pt ON pt.id = p.product_type_id
@@ -166,19 +169,22 @@ export function createApp(db = database, {
     res.json(result.recordset);
   }));
   app.post('/api/transactions/receiving', route(async (req, res) => {
-    const errorMessage = transactionError(req.body, 'receiving');
+    // Preserve submissions from forms cached before the release-number rename.
+    const { makRnNumber, ...body } = req.body;
+    if (!Object.hasOwn(body, 'makReleaseNumber')) body.makReleaseNumber = makRnNumber;
+    const errorMessage = transactionError(body, 'receiving');
     if (errorMessage) return fail(res, 400, errorMessage);
     const result = await db.transaction(async (executor) => {
-      if (!await lockProduct(req.body.productId, executor)) return { status: 404, error: 'Product not found.' };
+      if (!await lockProduct(body.productId, executor)) return { status: 404, error: 'Product not found.' };
       const inserted = await db.query(`
-        INSERT INTO dbo.receiving_transactions (product_id, receiving_date, quantity, material_lot_number, remarks, created_at)
-        VALUES (@productId, @date, @quantity, @materialLotNumber, @remarks, SYSUTCDATETIME());
+        INSERT INTO dbo.receiving_transactions (product_id, receiving_date, quantity, material_lot_number, mak_release_number, remarks, created_at)
+        VALUES (@productId, @date, @quantity, @materialLotNumber, @makReleaseNumber, @remarks, SYSUTCDATETIME());
         SELECT CAST(SCOPE_IDENTITY() AS int) AS id;
-      `, transactionInputs(req.body, 'receiving'), executor);
+      `, transactionInputs(body, 'receiving'), executor);
       return { id: inserted.recordset[0].id };
     });
     if (result.error) return fail(res, result.status, result.error);
-    res.status(201).json({ ...req.body, id: result.id });
+    res.status(201).json({ ...body, makReleaseNumber: body.makReleaseNumber?.trim() || null, id: result.id });
   }));
   app.post('/api/transactions/usage', route(async (req, res) => {
     const errorMessage = transactionError(req.body, 'usage');
@@ -186,26 +192,10 @@ export function createApp(db = database, {
     const result = await db.transaction(async (executor) => {
       if (!await lockProduct(req.body.productId, executor)) return { status: 404, error: 'Product not found.' };
       const product = await getProduct(req.body.productId, executor);
-      const materialLotNumber = req.body.materialLotNumber?.trim() || null;
       const inputs = transactionInputs(req.body, 'usage');
-      const lots = await db.query(`
-        SELECT CASE WHEN EXISTS (SELECT 1 FROM dbo.receiving_transactions
-          WHERE product_id = @productId AND material_lot_number IS NOT NULL) THEN 1 ELSE 0 END AS tracked
-      `, { productId: inputs.productId }, executor);
-      if (lots.recordset[0].tracked && !materialLotNumber) return { status: 400, error: 'Material lot number is required for this product.' };
-      let balance = Number(product.availableBalance);
-      if (materialLotNumber) {
-        const lot = await db.query(`
-          SELECT COALESCE((SELECT SUM(quantity) FROM dbo.receiving_transactions
-                            WHERE product_id = @productId AND material_lot_number COLLATE Latin1_General_100_BIN2 = @materialLotNumber), 0)
-               - COALESCE((SELECT SUM(quantity) FROM dbo.usage_transactions
-                            WHERE product_id = @productId AND material_lot_number COLLATE Latin1_General_100_BIN2 = @materialLotNumber), 0) AS available
-        `, { productId: inputs.productId, materialLotNumber: inputs.materialLotNumber }, executor);
-        balance = Math.min(balance, Number(lot.recordset[0].available));
-      }
+      const balance = Number(product.availableBalance);
       if (req.body.quantity > balance) {
-        const scope = materialLotNumber ? ` for material lot ${materialLotNumber}` : '';
-        return { status: 400, error: `Insufficient inventory${scope}. Available: ${balance} ${product.unit}.` };
+        return { status: 400, error: `Insufficient inventory. Available: ${balance} ${product.unit}.` };
       }
       const inserted = await db.query(`
         INSERT INTO dbo.usage_transactions (product_id, usage_date, quantity, material_lot_number, mak_lot_number, remarks, created_at)
@@ -223,7 +213,8 @@ export function createApp(db = database, {
     if (!product) return fail(res, 404, 'Product not found.');
     const inputs = { productId: [sql.Int, Number(req.params.id)] };
     const receiving = await db.query(`
-      SELECT id, CONVERT(char(10), receiving_date, 23) AS [date], material_lot_number AS materialLotNumber, quantity, remarks
+      SELECT id, CONVERT(char(10), receiving_date, 23) AS [date], material_lot_number AS materialLotNumber,
+             mak_release_number AS makReleaseNumber, quantity, remarks
       FROM dbo.receiving_transactions WHERE product_id = @productId ORDER BY receiving_date DESC, id DESC
     `, inputs);
     const usage = await db.query(`

@@ -1,14 +1,22 @@
 import { downloadBlob } from './download.js';
 import { productHistoryEntries, productHistoryFilename, productHistoryHeaders } from './product-history-report.js';
 
+const companyDetails = {
+  name: 'MAK Pharma USA',
+  address: '8 Middlebury Blvd, Randolph, NJ - 07869',
+  website: 'makpharmausa.com',
+};
 const dateLabel = (date) => `${date.getUTCMonth() + 1}/${date.getUTCDate()}/${String(date.getUTCFullYear()).slice(-2)}`;
 const numberLabel = (value) => value == null ? '' : value.toLocaleString('en-US', { maximumFractionDigits: 3 });
 
 export async function createProductHistoryPdf(history) {
   const entries = productHistoryEntries(history);
+  const closingBalance = entries.reduce((balance, entry) => balance + (entry.receivedQuantity ?? 0) - (entry.usedQuantity ?? 0), 0);
+  if (!Number.isFinite(closingBalance)) throw new Error('Closing balance must be a finite number.');
+  const closingBalanceLabel = [numberLabel(Number(closingBalance.toFixed(3)) || 0), history.product.unit].filter(Boolean).join(' ');
   const [{ jsPDF }, { autoTable }] = await Promise.all([import('jspdf'), import('jspdf-autotable')]);
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4', compress: false });
-  doc.setProperties({ title: `Inventory History - ${history.product.name || 'Product'}`, creator: 'MAK Inventory' });
+  doc.setProperties({ title: `Inventory History - ${history.product.name || 'Product'}`, author: companyDetails.name, creator: 'MAK Inventory' });
   const width = doc.internal.pageSize.getWidth();
   const height = doc.internal.pageSize.getHeight();
   const margin = 12;
@@ -21,10 +29,11 @@ export async function createProductHistoryPdf(history) {
   const metadata = [
     history.product.itemCode ? `Item Code: ${history.product.itemCode}` : '',
     history.product.makItemCode ? `MAK Item Code: ${history.product.makItemCode}` : '',
+    history.product.productType ? `Product Type: ${history.product.productType}` : '',
     history.product.unit ? `Unit: ${history.product.unit}` : '',
   ].filter(Boolean).join('  |  ');
   const metadataLines = metadata ? doc.splitTextToSize(metadata, availableWidth) : [];
-  const metadataY = 24 + productLines.length * 4.5;
+  const metadataY = 41 + productLines.length * 4.5;
   const tableTop = metadataY + metadataLines.length * 4 + 4;
   const headerPages = new Set();
   const drawHeader = () => {
@@ -33,10 +42,21 @@ export async function createProductHistoryPdf(history) {
     headerPages.add(page);
     doc.setTextColor(16, 43, 78);
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(16);
-    doc.text('Inventory History', margin, 15);
+    doc.setFontSize(17);
+    doc.text(companyDetails.name, margin, 16);
+    doc.setFontSize(15);
+    doc.text('Inventory History', width - margin, 16, { align: 'right' });
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(80, 96, 112);
+    doc.text(companyDetails.address, margin, 22);
+    doc.text(companyDetails.website, margin, 27);
+    doc.setDrawColor(220, 227, 234);
+    doc.line(margin, 32, width - margin, 32);
+    doc.setTextColor(16, 43, 78);
+    doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
-    doc.text(productLines, margin, 23, { lineHeightFactor: 1.15 });
+    doc.text(productLines, margin, 40, { lineHeightFactor: 1.15 });
     doc.setTextColor(80, 96, 112);
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
@@ -47,21 +67,27 @@ export async function createProductHistoryPdf(history) {
     margin: { top: tableTop, left: margin, right: margin, bottom: 14 },
     styles: { font: 'helvetica', fontSize: 9, cellPadding: 2, overflow: 'linebreak', valign: 'middle', lineColor: [220, 227, 234], lineWidth: 0.1 },
     headStyles: { fillColor: [16, 43, 78], textColor: 255, fontStyle: 'bold', halign: 'center' },
-    showHead: 'everyPage', rowPageBreak: 'avoid', willDrawPage: drawHeader,
+    footStyles: { fillColor: [235, 247, 239], textColor: [22, 122, 74], fontStyle: 'bold', halign: 'right' },
+    showHead: 'everyPage', showFoot: 'lastPage', rowPageBreak: 'avoid', willDrawPage: drawHeader,
   };
-  const keys = ['date', 'description', 'receivedQuantity', 'usedQuantity', 'usedAgainst'];
+  const keys = ['date', 'releaseNumber', 'description', 'receivedQuantity', 'usedQuantity', 'usedAgainst'];
+  const headers = ['Date', 'MAK Release Number', ...productHistoryHeaders.slice(1)];
   autoTable(doc, {
     ...tableOptions, startY: tableTop,
-    columns: productHistoryHeaders.map((header, index) => ({ header, dataKey: keys[index] })),
+    columns: headers.map((header, index) => ({ header, dataKey: keys[index] })),
     body: entries.map((entry) => ({
-      date: dateLabel(entry.date), description: entry.description,
+      date: dateLabel(entry.date), releaseNumber: entry.releaseNumber, description: entry.description,
       receivedQuantity: numberLabel(entry.receivedQuantity), usedQuantity: numberLabel(entry.usedQuantity),
       usedAgainst: entry.usedAgainst, receiving: entry.receiving,
     })),
+    foot: [[
+      { content: 'Closing balance', colSpan: 4 },
+      { content: closingBalanceLabel, colSpan: 2 },
+    ]],
     columnStyles: {
-      date: { cellWidth: 25 }, description: { cellWidth: availableWidth - 135 },
-      receivedQuantity: { cellWidth: 30, halign: 'right' }, usedQuantity: { cellWidth: 30, halign: 'right' },
-      usedAgainst: { cellWidth: 50 },
+      date: { cellWidth: 22 }, releaseNumber: { cellWidth: 40 }, description: { cellWidth: availableWidth - 162 },
+      receivedQuantity: { cellWidth: 27, halign: 'right' }, usedQuantity: { cellWidth: 27, halign: 'right' },
+      usedAgainst: { cellWidth: 46 },
     },
     didParseCell: (data) => {
       if (data.section !== 'body') return;
@@ -72,19 +98,6 @@ export async function createProductHistoryPdf(history) {
   if (!entries.length) {
     doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(80, 96, 112);
     doc.text('No transactions recorded for this product.', margin, doc.lastAutoTable.finalY + 8);
-  }
-  const notes = entries.filter((entry) => entry.notes);
-  if (notes.length) {
-    let notesY = doc.lastAutoTable.finalY + 9;
-    if (notesY + 16 > height - 14) { doc.addPage(); drawHeader(); notesY = tableTop + 4; }
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(16, 43, 78);
-    doc.text('Transaction Notes', margin, notesY);
-    autoTable(doc, {
-      ...tableOptions, startY: notesY + 3,
-      head: [['Date', 'Type', 'Notes']],
-      body: notes.map((entry) => [dateLabel(entry.date), entry.receiving ? 'Receiving' : 'Usage', entry.notes]),
-      columnStyles: { 0: { cellWidth: 25 }, 1: { cellWidth: 25 }, 2: { cellWidth: availableWidth - 50 } },
-    });
   }
   const pages = doc.internal.getNumberOfPages();
   for (let page = 1; page <= pages; page++) {

@@ -4,8 +4,8 @@ import ExcelJS from 'exceljs';
 import { createProductHistoryWorkbook, productHistoryFilename } from '../src/lib/product-history-workbook.js';
 
 const product = { id: 1, name: 'Qunol Ultra CoQ10 100mg 30ct - IFC', itemCode: '000123', makItemCode: 'MAK-001', unit: 'Pcs' };
-const receipt = (values = {}) => ({ id: 1, date: '2026-10-12', quantity: 3600, materialLotNumber: 'RN-001', remarks: 'Received stock', ...values });
-const usage = (values = {}) => ({ id: 1, date: '2026-10-13', quantity: 3600, makLotNumber: '0826083', remarks: 'Production use', ...values });
+const receipt = (values = {}) => ({ id: 1, date: '2026-10-12', quantity: 3600, makReleaseNumber: 'RN-001', materialLotNumber: 'REC-MAT-001', remarks: 'Received stock', ...values });
+const usage = (values = {}) => ({ id: 1, date: '2026-10-13', quantity: 3600, makLotNumber: '0826083', materialLotNumber: 'USE-MAT-001', remarks: 'Production use', ...values });
 const noteText = (cell) => typeof cell.note === 'string' ? cell.note : (cell.note?.texts || []).map((part) => part.text).join('');
 
 async function roundTrip(history) {
@@ -46,7 +46,9 @@ test('selected-product export matches the five-column receipt/usage ledger forma
   assert.equal(sheet.getCell('D3').alignment.horizontal, 'right');
   assert.equal(sheet.getCell('E4').value, '#0926103');
   assert.equal(sheet.getCell('C5').value, 1000);
-  assert.match(noteText(sheet.getCell('B2')), /MAK RN Number: RN-001/);
+  assert.match(noteText(sheet.getCell('B2')), /MAK Release Number: RN-001/);
+  assert.match(noteText(sheet.getCell('B2')), /Material lot number: REC-MAT-001/);
+  assert.match(noteText(sheet.getCell('E3')), /Material lot number: USE-MAT-001/);
   assert.match(noteText(sheet.getCell('B2')), /Remarks: Received stock/);
   assert.match(noteText(sheet.getCell('E3')), /Remarks: Production use/);
   assert.match(noteText(sheet.getCell('B1')), /Item Code: 000123/);

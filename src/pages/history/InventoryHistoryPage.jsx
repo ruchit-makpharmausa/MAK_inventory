@@ -3,13 +3,20 @@ import { useSearchParams } from 'react-router-dom';
 import PageHeading from '../../components/PageHeading.jsx';
 import HistoryTable from '../../components/HistoryTable.jsx';
 import { quantity } from '../../lib/format.js';
+import { productSortOptions, sortProducts } from '../../lib/product-sort.js';
 import { exportProductHistoryWorkbook } from '../../lib/product-history-workbook.js';
 import { exportProductHistoryPdf } from '../../lib/product-history-pdf.js';
 import api from '../../lib/api.js';
 
-export default function InventoryHistoryPage({ products }) {
+export default function InventoryHistoryPage({ products, types = [] }) {
   const [params, setParams] = useSearchParams();
-  const selectedProductId = params.get('productId') || '';
+  const typeFilter = params.get('typeId') || '';
+  const requestedProductId = params.get('productId') || '';
+  const selectedProduct = products.find((product) => String(product.id) === requestedProductId);
+  const selectedProductId = typeFilter && selectedProduct && String(selectedProduct.productTypeId) !== typeFilter
+    ? '' : requestedProductId;
+  const [sortOrder, setSortOrder] = useState('name-asc');
+  const matchingProducts = sortProducts(products.filter((product) => !typeFilter || String(product.productTypeId) === typeFilter), sortOrder);
   const [history, setHistory] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -36,6 +43,19 @@ export default function InventoryHistoryPage({ products }) {
     setParams(next);
   };
 
+  const onTypeSelect = (typeId) => {
+    const next = new URLSearchParams(params);
+    if (typeId) next.set('typeId', typeId);
+    else next.delete('typeId');
+    if (typeId && String(selectedProduct?.productTypeId) !== typeId) {
+      next.delete('productId');
+      setHistory(null);
+      setError('');
+      setLoading(false);
+    }
+    setParams(next);
+  };
+
   const onExport = async (format) => {
     if (!history || exporting) return;
     setExporting(format);
@@ -59,11 +79,21 @@ export default function InventoryHistoryPage({ products }) {
         <button className="button secondary" onClick={() => onExport('pdf')} disabled={Boolean(exporting)}>
           ⇩ {exporting === 'pdf' ? 'Exporting…' : 'Export PDF'}</button>
       </div>} />
-    <section className="panel history-picker">
+    <section className="panel history-picker" style={{ display: 'grid', gap: 12 }}>
+      <label>Product type
+        <select value={typeFilter} onChange={(event) => onTypeSelect(event.target.value)}>
+          <option value="">All product types</option>{types.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
+        </select>
+      </label>
+      <label>Sort products
+        <select aria-label="Sort products" value={sortOrder} onChange={(event) => setSortOrder(event.target.value)}>
+          {productSortOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </select>
+      </label>
       <label>Select product
         <select value={selectedProductId} onChange={(event) => onSelect(event.target.value)}>
           <option value="">Choose a product</option>
-          {products.map((p) => <option key={p.id} value={p.id}>{p.itemCode} — {p.name}</option>)}
+          {matchingProducts.map((p) => <option key={p.id} value={p.id}>{p.makItemCode || '—'} · {p.itemCode} — {p.name} ({p.productType})</option>)}
         </select>
       </label>
     </section>
@@ -74,7 +104,7 @@ export default function InventoryHistoryPage({ products }) {
       : <>
         <div className="balance-banner"><div><span>Current available balance</span><strong>
           {quantity(history.product.availableBalance)} <small>{history.product.unit}</small></strong></div>
-          <span className="balance-product">{history.product.itemCode} · {history.product.name}</span></div>
+          <span className="balance-product">{history.product.productType} · {history.product.itemCode} · {history.product.name}</span></div>
         <HistoryTable title="Receiving history" subtitle="Materials added to inventory"
           rows={history.receiving} receiving />
         <HistoryTable title="Usage history" subtitle="Materials used in production"

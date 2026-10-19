@@ -37,6 +37,13 @@ test('existing schema is checked using only a read; missing columns stop connect
   await assert.rejects(verifyExistingSchema(pool), (error) => error.status === 503 && /mak_item_code/.test(error.message));
 });
 
+test('the receiving release-number schema is required before accepting new separate material lots', async () => {
+  const rows = Object.entries(expectedColumns).flatMap(([tableName, columns]) => columns
+    .filter((columnName) => columnName !== 'mak_release_number').map((columnName) => ({ tableName, columnName })));
+  const pool = { request: () => ({ async query() { return { recordset: rows }; } }) };
+  await assert.rejects(verifyExistingSchema(pool), (error) => error.status === 503 && /dbo\.receiving_transactions\.mak_release_number/.test(error.message));
+});
+
 test('query timeouts are distinguished from connection timeouts without exposing SQL details', () => {
   const queryError = Object.assign(new Error('private-query-and-credentials'), { name: 'RequestError', code: 'ETIMEOUT' });
   const queryFailure = connectionFailure(queryError);

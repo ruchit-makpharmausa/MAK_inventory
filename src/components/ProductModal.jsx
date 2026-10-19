@@ -21,7 +21,8 @@ export default function ProductModal({ editingProduct, types, onAddType, onSubmi
         </label>
         <div className="form-grid">
           <label>Item Code <span className="required">*</span>
-            <input name="itemCode" required defaultValue={editingProduct.itemCode || ''} placeholder="e.g. LB-001" />
+            <input name="itemCode" required defaultValue={editingProduct.itemCode || ''} placeholder="e.g. LB-001" aria-describedby="item-code-help" />
+            <span id="item-code-help" className="muted-label">Must be unique within the selected product type.</span>
           </label>
           <label>MAK Item Code
             <input name="makItemCode" defaultValue={editingProduct.makItemCode || ''} placeholder="e.g. MAK-LB-001" />

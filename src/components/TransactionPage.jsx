@@ -2,9 +2,14 @@ import { useEffect, useState } from 'react';
 import PageHeading from './PageHeading.jsx';
 import api from '../lib/api.js';
 import { dateLabel, quantity, today } from '../lib/format.js';
+import { productSortOptions, sortProducts } from '../lib/product-sort.js';
 
-export default function TransactionPage({ kind, products, onSaved }) {
+export default function TransactionPage({ kind, products, types = [], onSaved }) {
   const receiving = kind === 'receiving';
+  const [productTypeId, setProductTypeId] = useState('');
+  const [productId, setProductId] = useState('');
+  const [sortOrder, setSortOrder] = useState('name-asc');
+  const matchingProducts = sortProducts(products.filter((product) => String(product.productTypeId) === productTypeId), sortOrder);
   const [saving, setSaving] = useState(false);
   const [rows, setRows] = useState([]);
   const [error, setError] = useState('');
@@ -25,6 +30,8 @@ export default function TransactionPage({ kind, products, onSaved }) {
     try {
       await api(`/api/transactions/${kind}`, { method: 'POST', body: JSON.stringify(body) });
       formElement.reset();
+      setProductTypeId('');
+      setProductId('');
       setFormKey((key) => key + 1);
       await onSaved(kind);
       setRows(await api(`/api/transactions/${kind}`));
@@ -45,10 +52,26 @@ export default function TransactionPage({ kind, products, onSaved }) {
         {error && <div className="form-error" role="alert">{error}</div>}
         {!products.length && <div className="form-error" role="alert">Add a product in Product Master before recording transactions.</div>}
         <form key={formKey} onSubmit={submit}>
+          <label>Product type <span className="required">*</span>
+            <select required value={productTypeId} onChange={(event) => {
+              setProductTypeId(event.target.value);
+              setProductId('');
+            }}>
+              <option value="" disabled>Select product type</option>
+              {types.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
+            </select>
+          </label>
+          <label>Sort products
+            <select aria-label="Sort products" value={sortOrder} onChange={(event) => setSortOrder(event.target.value)}>
+              {productSortOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </label>
           <label>Product <span className="required">*</span>
-            <select name="productId" required defaultValue="">
-              <option value="" disabled>Select product by name or item code</option>
-              {products.map((p) => <option key={p.id} value={p.id}>{p.itemCode} — {p.name} ({quantity(p.availableBalance)} {p.unit} available)</option>)}
+            <select name="productId" required value={productId} onChange={(event) => setProductId(event.target.value)}
+              disabled={!productTypeId || !matchingProducts.length}>
+              <option value="" disabled>{!productTypeId ? 'Select product type first'
+                : !matchingProducts.length ? 'No products in this type' : 'Select product by name or item code'}</option>
+              {matchingProducts.map((p) => <option key={p.id} value={p.id}>{p.makItemCode || '—'} · {p.itemCode} — {p.name} ({p.productType}) ({quantity(p.availableBalance)} {p.unit} available)</option>)}
             </select>
           </label>
           <label>{receiving ? 'Receiving' : 'Usage'} date <span className="required">*</span>
@@ -57,9 +80,11 @@ export default function TransactionPage({ kind, products, onSaved }) {
           <label>{receiving ? 'Received quantity' : 'Quantity used'} <span className="required">*</span>
             <input name="quantity" type="number" min="0" step="any" required placeholder="Enter quantity" />
           </label>
-          <label>{receiving ? 'MAK RN Number' : 'Material lot number'}
-            <span className="muted-label">{receiving ? ' (optional)' : ' (required when product inventory is lot-tracked)'}</span>
-            <input name="materialLotNumber" placeholder={receiving ? 'Enter MAK RN Number' : 'Enter material lot number'} />
+          {receiving && <label>MAK Release Number <span className="muted-label">(optional)</span>
+            <input name="makReleaseNumber" maxLength={255} placeholder="Enter MAK Release Number" />
+          </label>}
+          <label>Material lot number <span className="muted-label">(optional)</span>
+            <input name="materialLotNumber" maxLength={255} placeholder="Enter material lot number" />
           </label>
           {!receiving && <label>MAK lot number <span className="required">*</span>
             <input name="makLotNumber" required placeholder="e.g. M260001" />
@@ -67,7 +92,7 @@ export default function TransactionPage({ kind, products, onSaved }) {
           <label>Remarks <span className="muted-label">(optional)</span>
             <textarea name="remarks" rows="3" placeholder="Add a note if needed" />
           </label>
-          <button className="button primary submit-button" disabled={saving || !products.length}>
+          <button className="button primary submit-button" disabled={saving || !productId}>
             {saving ? 'Saving…' : receiving ? 'Save receiving' : 'Save usage'}
           </button>
         </form>
@@ -78,7 +103,7 @@ export default function TransactionPage({ kind, products, onSaved }) {
         {!rows.length ? <div className="empty-state compact"><span>No transactions recorded yet.</span></div>
           : <div className="recent-list">{rows.slice(0, 8).map((row) => <div className="recent-row" key={row.id}>
             <div className={`recent-icon ${receiving ? 'green' : 'amber'}`}>{receiving ? '↓' : '↑'}</div>
-            <div className="recent-info"><strong>{row.productName}</strong><span>{row.itemCode} · {dateLabel(row.date)}</span></div>
+            <div className="recent-info"><strong>{row.productName}</strong><span>{row.productType} · {row.itemCode} · {dateLabel(row.date)}</span></div>
             <div className="recent-quantity">{receiving ? '+' : '−'}{quantity(row.quantity)}<small>{row.unit}</small></div>
           </div>)}</div>}
       </section>
