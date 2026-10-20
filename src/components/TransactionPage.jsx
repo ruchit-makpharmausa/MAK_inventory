@@ -1,15 +1,20 @@
 import { useEffect, useState } from 'react';
 import PageHeading from './PageHeading.jsx';
+import TransactionFields from './TransactionFields.jsx';
 import api from '../lib/api.js';
-import { dateLabel, quantity, today } from '../lib/format.js';
-import { productSortOptions, sortProducts } from '../lib/product-sort.js';
+import { dateLabel, quantity } from '../lib/format.js';
+import { sortProducts } from '../lib/product-sort.js';
 
-export default function TransactionPage({ kind, products, types = [], onSaved }) {
+export default function TransactionPage({ kind, products, types = [], onSaved, initialProductId = '' }) {
   const receiving = kind === 'receiving';
-  const [productTypeId, setProductTypeId] = useState('');
-  const [productId, setProductId] = useState('');
-  const [sortOrder, setSortOrder] = useState('name-asc');
-  const matchingProducts = sortProducts(products.filter((product) => String(product.productTypeId) === productTypeId), sortOrder);
+  const initialProduct = products.find((product) => String(product.id) === initialProductId);
+  const [productTypeId, setProductTypeId] = useState(() => initialProduct ? String(initialProduct.productTypeId) : '');
+  const [productId, setProductId] = useState(() => initialProduct ? String(initialProduct.id) : '');
+  const matchingProducts = sortProducts(products.filter((product) => String(product.productTypeId) === productTypeId));
+  useEffect(() => {
+    setProductTypeId(initialProduct ? String(initialProduct.productTypeId) : '');
+    setProductId(initialProduct ? String(initialProduct.id) : '');
+  }, [initialProductId, initialProduct?.id, initialProduct?.productTypeId]);
   const [saving, setSaving] = useState(false);
   const [rows, setRows] = useState([]);
   const [error, setError] = useState('');
@@ -30,8 +35,10 @@ export default function TransactionPage({ kind, products, types = [], onSaved })
     try {
       await api(`/api/transactions/${kind}`, { method: 'POST', body: JSON.stringify(body) });
       formElement.reset();
-      setProductTypeId('');
-      setProductId('');
+      if (!initialProductId) {
+        setProductTypeId('');
+        setProductId('');
+      }
       setFormKey((key) => key + 1);
       await onSaved(kind);
       setRows(await api(`/api/transactions/${kind}`));
@@ -61,11 +68,6 @@ export default function TransactionPage({ kind, products, types = [], onSaved })
               {types.map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
             </select>
           </label>
-          <label>Sort products
-            <select aria-label="Sort products" value={sortOrder} onChange={(event) => setSortOrder(event.target.value)}>
-              {productSortOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </select>
-          </label>
           <label>Product <span className="required">*</span>
             <select name="productId" required value={productId} onChange={(event) => setProductId(event.target.value)}
               disabled={!productTypeId || !matchingProducts.length}>
@@ -74,24 +76,7 @@ export default function TransactionPage({ kind, products, types = [], onSaved })
               {matchingProducts.map((p) => <option key={p.id} value={p.id}>{p.makItemCode || '—'} · {p.itemCode} — {p.name} ({p.productType}) ({quantity(p.availableBalance)} {p.unit} available)</option>)}
             </select>
           </label>
-          <label>{receiving ? 'Receiving' : 'Usage'} date <span className="required">*</span>
-            <input name={receiving ? 'receivingDate' : 'usageDate'} type="date" required defaultValue={today()} />
-          </label>
-          <label>{receiving ? 'Received quantity' : 'Quantity used'} <span className="required">*</span>
-            <input name="quantity" type="number" min="0" step="any" required placeholder="Enter quantity" />
-          </label>
-          {receiving && <label>MAK Release Number <span className="muted-label">(optional)</span>
-            <input name="makReleaseNumber" maxLength={255} placeholder="Enter MAK Release Number" />
-          </label>}
-          <label>Material lot number <span className="muted-label">(optional)</span>
-            <input name="materialLotNumber" maxLength={255} placeholder="Enter material lot number" />
-          </label>
-          {!receiving && <label>MAK lot number <span className="required">*</span>
-            <input name="makLotNumber" required placeholder="e.g. M260001" />
-          </label>}
-          <label>Remarks <span className="muted-label">(optional)</span>
-            <textarea name="remarks" rows="3" placeholder="Add a note if needed" />
-          </label>
+          <TransactionFields kind={kind} />
           <button className="button primary submit-button" disabled={saving || !productId}>
             {saving ? 'Saving…' : receiving ? 'Save receiving' : 'Save usage'}
           </button>

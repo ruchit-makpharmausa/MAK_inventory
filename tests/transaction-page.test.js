@@ -3,6 +3,7 @@ import test from 'node:test';
 import { createServer as createHttpServer } from 'node:http';
 import { Children, createElement, isValidElement, useState } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { StaticRouter } from 'react-router-dom/server.js';
 import { createServer } from 'vite';
 import { quantity } from '../src/lib/format.js';
 
@@ -89,7 +90,7 @@ test('receiving and usage require a product type before exposing products', asyn
       onSaved: async () => {},
     };
     for (const Page of [ReceivingPage, UsagePage]) {
-      const html = renderToStaticMarkup(createElement(Page, props));
+      const html = renderToStaticMarkup(createElement(StaticRouter, { location: '/' }, createElement(Page, props)));
       assert.match(html, /<label>Product type <span class="required">\*<\/span><select required="">/);
       assert.match(html, /<option value="1">Sleeve<\/option>/);
       assert.match(html, /<option value="2">IFC<\/option>/);

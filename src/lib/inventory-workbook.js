@@ -1,4 +1,4 @@
-import { createWorkbook, downloadWorkbook, numericQuantity } from './excel.js';
+import { createWorkbook, downloadWorkbook, numericQuantity, worksheetName } from './excel.js';
 
 const columns = [
   { header: 'Product Name', key: 'name', width: 44 },
@@ -9,41 +9,24 @@ const columns = [
   { header: 'Available', key: 'availableBalance', width: 18 },
 ];
 
-function productTypeName(value) {
-  const name = String(value ?? '').trim() || 'Other';
-  if (/^sleeves?$/i.test(name)) return 'Sleeve';
-  if (/^ifc$/i.test(name)) return 'IFC';
-  if (/^bulk$/i.test(name)) return 'Bulk';
-  return name;
-}
+const productTypeName = (value) => String(value ?? '').trim() || 'Other';
 
-function sheetName(name, usedNames) {
-  let base = name.replace(/[\\/?*[\]:\u0000-\u001f\u007f]/g, '-').replace(/^['\s]+|['\s]+$/g, '') || 'Other';
-  if (base.toLowerCase() === 'history') base = 'History Items';
-  const prefix = (length) => base.slice(0, length).replace(/['\uD800-\uDBFF]+$/g, '') || 'Other';
-  let candidate = prefix(31);
-  let suffix = 2;
-  while (usedNames.has(candidate.toLowerCase())) {
-    const ending = ` (${suffix++})`;
-    candidate = `${prefix(31 - ending.length)}${ending}`;
-  }
-  usedNames.add(candidate.toLowerCase());
-  return candidate;
-}
-
-export async function createInventoryWorkbook(products) {
+export async function createInventoryWorkbook(products, types = []) {
   const workbook = await createWorkbook();
-  const groups = new Map(['Sleeve', 'IFC', 'Bulk'].map((name) => [name.toLowerCase(), { name, products: [] }]));
+  const groups = new Map(types.map((type) => [`id:${type.id}`, { name: productTypeName(type.name), products: [] }]));
+  const typeKeysByName = new Map(types.map((type) => [productTypeName(type.name).toLowerCase(), `id:${type.id}`]));
   for (const product of products) {
     const name = productTypeName(product.productType);
-    const key = name.toLowerCase();
+    const key = product.productTypeId != null ? `id:${product.productTypeId}`
+      : typeKeysByName.get(name.toLowerCase()) || `name:${name.toLowerCase()}`;
     if (!groups.has(key)) groups.set(key, { name, products: [] });
     groups.get(key).products.push(product);
   }
+  if (!groups.size) groups.set('empty', { name: 'Inventory', products: [] });
 
   const usedNames = new Set();
   for (const group of groups.values()) {
-    const sheet = workbook.addWorksheet(sheetName(group.name, usedNames), {
+    const sheet = workbook.addWorksheet(worksheetName(group.name, usedNames), {
       views: [{ state: 'frozen', ySplit: 1 }],
     });
     sheet.columns = columns.map((column) => ({ ...column }));
@@ -58,8 +41,11 @@ export async function createInventoryWorkbook(products) {
       });
     }
     for (const column of [4, 5, 6]) {
-      sheet.getColumn(column).numFmt = '#,##0.###';
+      sheet.getColumn(column).numFmt = '#,##0;-#,##0;;@';
       sheet.getColumn(column).alignment = { horizontal: 'right' };
+      sheet.getColumn(column).eachCell((cell, row) => {
+        if (row > 1 && !Number.isInteger(cell.value)) cell.numFmt = '#,##0.0##;-#,##0.0##;;@';
+      });
     }
     sheet.getRow(1).height = 24;
     sheet.getRow(1).eachCell((cell, column) => {
@@ -72,7 +58,7 @@ export async function createInventoryWorkbook(products) {
   return workbook;
 }
 
-export async function exportInventoryWorkbook(products) {
-  const workbook = await createInventoryWorkbook(products);
+export async function exportInventoryWorkbook(products, types = []) {
+  const workbook = await createInventoryWorkbook(products, types);
   await downloadWorkbook(workbook, 'mak-inventory-summary.xlsx');
 }

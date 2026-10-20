@@ -282,6 +282,72 @@ test('invalid transactions are rejected before reaching the database', async () 
   });
 });
 
+test('type history export groups all product ledgers by ID using four type-scoped queries', async () => {
+  const type = { id: 7, name: 'New packaging type' };
+  const first = { ...product, id: 17, productTypeId: 7, productType: type.name };
+  const second = { ...first, id: 18 };
+  const empty = { ...first, id: 19 };
+  const receipt = { id: 1, productId: 17, date: '2026-10-17', quantity: 10, makReleaseNumber: '000REL' };
+  const otherReceipt = { ...receipt, id: 2, productId: 18, quantity: 25 };
+  const usage = { id: 3, productId: 17, date: '2026-10-18', quantity: 4, makLotNumber: 'M123' };
+  const db = mockDatabase([[type], [first, second, empty], [receipt, otherReceipt], [usage]]);
+  await withApi(db, async (request) => {
+    const result = await request('/api/product-types/7/history');
+    assert.equal(result.status, 200);
+    assert.deepEqual(result.body, { type, histories: [
+      { product: first, receiving: [receipt], usage: [usage] },
+      { product: second, receiving: [otherReceipt], usage: [] },
+      { product: empty, receiving: [], usage: [] },
+    ] });
+    assert.equal(db.calls.length, 4);
+    for (const call of db.calls) assert.equal(call.parameters.typeId[1], 7);
+    for (const call of db.calls.slice(1)) assert.match(call.statement, /WHERE p\.product_type_id = @typeId/);
+    assert.match(db.calls[2].statement, /mak_release_number AS makReleaseNumber/);
+    assert.match(db.calls[3].statement, /mak_lot_number AS makLotNumber/);
+    assert.ok(db.calls.every((call) => !/\b(INSERT|UPDATE|DELETE|ALTER|DROP)\b/.test(call.statement)));
+  });
+});
+
+test('type history export supports empty registered types and rejects invalid or missing types', async () => {
+  const db = mockDatabase([[{ id: 9, name: 'Empty type' }], [], []]);
+  await withApi(db, async (request) => {
+    for (const id of ['bad', '-1', '0', '2147483648']) assert.equal((await request(`/api/product-types/${id}/history`)).status, 404);
+    assert.equal(db.calls.length, 0);
+    const empty = await request('/api/product-types/9/history');
+    assert.deepEqual(empty, { status: 200, body: { type: { id: 9, name: 'Empty type' }, histories: [] } });
+    assert.equal(db.calls.length, 2);
+    const missing = await request('/api/product-types/100/history');
+    assert.deepEqual(missing, { status: 404, body: { error: 'Product type not found.' } });
+  });
+});
+
+test('type history query count stays constant for a large product catalog and failures return no partial report', async () => {
+  const catalog = Array.from({ length: 200 }, (_, index) => ({ ...product, id: index + 1 }));
+  const timeout = Object.assign(new Error('private-query-details'), { name: 'RequestError', code: 'ETIMEOUT' });
+  const db = mockDatabase([[{ id: 1, name: 'Label' }], catalog, [], [], [{ id: 1, name: 'Label' }], catalog, timeout]);
+  await withApi(db, async (request) => {
+    const result = await request('/api/product-types/1/history');
+    assert.equal(result.status, 200);
+    assert.equal(result.body.histories.length, 200);
+    assert.equal(db.calls.length, 4);
+    const failed = await request('/api/product-types/1/history');
+    assert.equal(failed.status, 503);
+    assert.ok(!Object.hasOwn(failed.body, 'histories'));
+    assert.doesNotMatch(failed.body.error, /private-query-details/);
+  });
+});
+
+test('type history export requires authentication', async () => {
+  const db = mockDatabase();
+  const server = createApp(db, { serveClient: false }).listen(0, '127.0.0.1');
+  await new Promise((resolve) => server.once('listening', resolve));
+  try {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/product-types/1/history`);
+    assert.equal(response.status, 401);
+    assert.equal(db.calls.length, 0);
+  } finally { await new Promise((resolve) => server.close(resolve)); }
+});
+
 test('health executes a zero-row inventory read instead of trusting a cached connection', async () => {
   const db = mockDatabase([[]]);
   await withApi(db, async (request) => {

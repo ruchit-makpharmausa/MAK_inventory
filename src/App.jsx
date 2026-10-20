@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import AppLayout from './components/AppLayout.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
@@ -14,6 +14,7 @@ import NotFoundPage from './pages/not-found/NotFoundPage.jsx';
 import api from './lib/api.js';
 import { exportCsv } from './lib/csv.js';
 import { exportInventoryWorkbook } from './lib/inventory-workbook.js';
+import { exportTypeHistoryWorkbook } from './lib/type-history-workbook.js';
 import { loginDestination } from './lib/routes.js';
 
 function App() {
@@ -32,6 +33,7 @@ function App() {
   const [message, setMessage] = useState(null);
   const [busy, setBusy] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const exportInProgress = useRef(false);
 
   useEffect(() => {
     api('/api/auth/session')
@@ -117,14 +119,23 @@ function App() {
     await refresh();
   };
 
-  const exportDashboard = async () => {
+  const exportDashboard = async (typeId = '') => {
+    if (exportInProgress.current) return;
+    exportInProgress.current = true;
     setExporting(true);
     try {
-      await exportInventoryWorkbook(allProducts);
-      setMessage({ kind: 'success', text: 'Inventory Excel workbook downloaded.' });
+      if (typeId) {
+        const report = await api(`/api/product-types/${encodeURIComponent(typeId)}/history`);
+        await exportTypeHistoryWorkbook(report);
+        setMessage({ kind: 'success', text: `${report.type.name} product history workbook downloaded.` });
+      } else {
+        await exportInventoryWorkbook(allProducts, types);
+        setMessage({ kind: 'success', text: 'Inventory Excel workbook downloaded.' });
+      }
     } catch {
       setMessage({ kind: 'error', text: 'Unable to export the Excel workbook. Please try again.' });
     } finally {
+      exportInProgress.current = false;
       setExporting(false);
     }
   };
@@ -169,13 +180,6 @@ function App() {
     }
   };
 
-  const activeProducts = allProducts.length;
-  const totals = useMemo(() => allProducts.reduce((sum, product) => ({
-    received: sum.received + Number(product.totalReceived),
-    used: sum.used + Number(product.totalUsed),
-    balance: sum.balance + Number(product.availableBalance),
-  }), { received: 0, used: 0, balance: 0 }), [allProducts]);
-
   if (authLoading) return <div className="auth-loading" role="status">Checking your sign-in…</div>;
 
   return <>
@@ -188,7 +192,7 @@ function App() {
           onDismiss={() => setMessage(null)} />}>
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<DashboardPage
-            products={products} totals={totals} activeProducts={activeProducts}
+            products={products} allProducts={allProducts}
             search={search} setSearch={setSearch} typeFilter={typeFilter} setTypeFilter={setTypeFilter}
             types={types} onHistory={openHistory} onExport={exportDashboard} exporting={exporting} />} />
           <Route path="/products" element={<ProductsPage products={allProducts} search={search}
@@ -196,7 +200,7 @@ function App() {
             onEdit={setEditingProduct} onHistory={openHistory} onExport={exportSummary} />} />
           <Route path="/receiving" element={<ReceivingPage products={allProducts} types={types} onSaved={onTransactionSaved} />} />
           <Route path="/usage" element={<UsagePage products={allProducts} types={types} onSaved={onTransactionSaved} />} />
-          <Route path="/inv_history" element={<InventoryHistoryPage products={allProducts} types={types} />} />
+          <Route path="/inv_history" element={<InventoryHistoryPage products={allProducts} types={types} onSaved={onTransactionSaved} />} />
           <Route path="/history" element={<Navigate to={`/inv_history${location.search}${location.hash}`} replace />} />
           <Route path="/admin" element={user?.isAdmin ? <AdminPage api={api} /> : <Navigate to="/dashboard" replace />} />
           <Route path="*" element={<NotFoundPage />} />

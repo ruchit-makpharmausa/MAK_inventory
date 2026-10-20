@@ -10,7 +10,7 @@ export default function AppLayout({ user, message, onSignOut, onDismiss }) {
     <aside className="sidebar">
       <div className="brand">
         <div className="brand-mark">M</div>
-        <div><strong>MAK Pharma</strong><span>Inventory Management</span></div>
+        <div><strong>MAK Pharma USA</strong><span>Inventory Management</span></div>
       </div>
       <div className="nav-label">WORKSPACE</div>
       <nav aria-label="Workspace">

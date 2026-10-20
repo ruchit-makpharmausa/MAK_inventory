@@ -1,19 +1,25 @@
 import PageHeading from '../../components/PageHeading.jsx';
 import InventoryTable from '../../components/InventoryTable.jsx';
+import DashboardExportMenu from '../../components/DashboardExportMenu.jsx';
 import { quantity } from '../../lib/format.js';
+import { inventoryTypeTotals } from '../../lib/inventory-type-totals.js';
 
-export default function DashboardPage({ products, totals, activeProducts, search, setSearch, typeFilter, setTypeFilter,
+export default function DashboardPage({ products, allProducts = products, search, setSearch, typeFilter, setTypeFilter,
   types, onHistory, onExport, exporting = false }) {
+  const typeTotals = inventoryTypeTotals(allProducts, types);
   return <>
     <PageHeading eyebrow="OVERVIEW" title="Inventory dashboard"
       subtitle="A clear view of your product stock and recent inventory position."
-      action={<button className="button secondary export-button" onClick={onExport} disabled={exporting}>
-        ⇩ <span>{exporting ? 'Exporting…' : 'Export Excel'}</span></button>} />
-    <div className="stat-grid">
-      <StatCard label="Active products" value={quantity(activeProducts)} icon="▤" tone="blue" />
-      <StatCard label="Total received" value={quantity(totals.received)} icon="↓" tone="green" />
-      <StatCard label="Total used" value={quantity(totals.used)} icon="↑" tone="amber" />
-      <StatCard label="Current balance" value={quantity(totals.balance)} icon="◉" tone="navy" />
+      action={<DashboardExportMenu types={types} onExport={onExport} exporting={exporting} />} />
+    <div className="stat-grid" aria-label="Inventory totals by product type">
+      {typeTotals.map((type) => <section className="stat-card" key={type.id} aria-label={`${type.name} inventory totals`}>
+        <h2>{type.name}</h2>
+        <dl>
+          <TypeMetric label="Total received" field="received" units={type.units} />
+          <TypeMetric label="Total used" field="used" units={type.units} />
+          <TypeMetric label="Current balance" field="balance" units={type.units} />
+        </dl>
+      </section>)}
     </div>
     <section className="panel">
       <div className="panel-heading"><div><h2>Inventory summary</h2>
@@ -32,7 +38,11 @@ export default function DashboardPage({ products, totals, activeProducts, search
   </>;
 }
 
-function StatCard({ label, value, icon, tone }) {
-  return <div className="stat-card"><div className={`stat-icon ${tone}`}>{icon}</div>
-    <div className="stat-label">{label}</div><div className="stat-value">{value}</div></div>;
+function TypeMetric({ label, field, units }) {
+  return <div className={`type-metric ${field}`}>
+    <dt>{label}</dt>
+    <dd>{units.length ? units.map((totals) => <span key={totals.unit}>
+      {quantity(totals[field])}{totals.unit && <> <small>{totals.unit}</small></>}
+    </span>) : <span>0</span>}</dd>
+  </div>;
 }

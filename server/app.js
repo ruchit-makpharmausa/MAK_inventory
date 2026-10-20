@@ -104,6 +104,32 @@ export function createApp(db = database, {
       throw error;
     }
   }));
+  app.get('/api/product-types/:id/history', route(async (req, res) => {
+    if (!validId(req.params.id)) return fail(res, 404, 'Product type not found.');
+    const inputs = { typeId: [sql.Int, Number(req.params.id)] };
+    const typeResult = await db.query('SELECT id, name FROM dbo.product_types WHERE id = @typeId', inputs);
+    const type = typeResult.recordset[0];
+    if (!type) return fail(res, 404, 'Product type not found.');
+    const products = await db.query(`${productSelect} WHERE p.product_type_id = @typeId ORDER BY p.mak_item_code, p.id`, inputs);
+    if (!products.recordset.length) return res.json({ type, histories: [] });
+    const receiving = await db.query(`
+      SELECT t.id, t.product_id AS productId, CONVERT(char(10), t.receiving_date, 23) AS [date], t.quantity,
+             t.material_lot_number AS materialLotNumber, t.mak_release_number AS makReleaseNumber, t.remarks
+      FROM dbo.receiving_transactions t JOIN dbo.products p ON p.id = t.product_id
+      WHERE p.product_type_id = @typeId ORDER BY t.receiving_date, t.id
+    `, inputs);
+    const usage = await db.query(`
+      SELECT t.id, t.product_id AS productId, CONVERT(char(10), t.usage_date, 23) AS [date], t.quantity,
+             t.material_lot_number AS materialLotNumber, t.mak_lot_number AS makLotNumber, t.remarks
+      FROM dbo.usage_transactions t JOIN dbo.products p ON p.id = t.product_id
+      WHERE p.product_type_id = @typeId ORDER BY t.usage_date, t.id
+    `, inputs);
+    const histories = products.recordset.map((product) => ({ product, receiving: [], usage: [] }));
+    const byProduct = new Map(histories.map((history) => [String(history.product.id), history]));
+    for (const row of receiving.recordset) byProduct.get(String(row.productId))?.receiving.push(row);
+    for (const row of usage.recordset) byProduct.get(String(row.productId))?.usage.push(row);
+    res.json({ type, histories });
+  }));
   app.get('/api/products', route(async (req, res) => {
     const search = String(req.query.search || '').trim();
     const typeId = req.query.typeId ? Number(req.query.typeId) : null;
