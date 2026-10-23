@@ -150,6 +150,53 @@ test('identical names and codes in different types keep their histories scoped t
   });
 });
 
+test('material lot availability is product-scoped and keeps case-distinct lot identities', async () => {
+  const lots = [
+    { materialLotNumber: 'LOT', availableQuantity: 6 },
+    { materialLotNumber: 'lot', availableQuantity: 2.5 },
+  ];
+  const other = { ...product, id: 18, productTypeId: 2, productType: 'Bulk' };
+  const otherLots = [{ materialLotNumber: 'LOT', availableQuantity: 23 }];
+  const db = mockDatabase([[product], lots, [other], otherLots]);
+  await withApi(db, async (request) => {
+    assert.deepEqual(await request('/api/products/17/material-lots'), { status: 200, body: lots });
+    assert.deepEqual(await request('/api/products/18/material-lots'), { status: 200, body: otherLots });
+    assert.equal(db.calls.length, 4);
+    for (const [index, productId] of [[0, 17], [2, 18]]) {
+      assert.equal(db.calls[index].parameters.id[1], productId);
+      const query = db.calls[index + 1];
+      assert.equal(query.parameters.productId[1], productId);
+      assert.equal(query.executor, undefined);
+      assert.equal(query.parameters.lotWhitespace[1].trim(), '');
+      assert.equal(query.parameters.lotWhitespace[1].length, 25);
+      assert.equal((query.statement.match(/SUM\(quantity\) AS quantity/g) || []).length, 2);
+      assert.equal((query.statement.match(/WHERE product_id = @productId AND material_lot_number IS NOT NULL/g) || []).length, 2);
+      assert.equal((query.statement.match(/GROUP BY TRIM\(@lotWhitespace FROM material_lot_number\) COLLATE Latin1_General_100_BIN2/g) || []).length, 2);
+      assert.equal((query.statement.match(/TRIM\(@lotWhitespace FROM material_lot_number\) COLLATE Latin1_General_100_BIN2 AS materialLotNumber/g) || []).length, 2);
+      assert.match(query.statement, /FROM received r LEFT JOIN used u ON u\.materialLotNumber = r\.materialLotNumber/);
+      assert.match(query.statement, /WHERE r\.materialLotNumber <> N'' AND r\.quantity - COALESCE\(u\.quantity, 0\) > 0/);
+      assert.match(query.statement, /r\.quantity - COALESCE\(u\.quantity, 0\) AS availableQuantity/);
+      assert.match(query.statement, /ORDER BY r\.materialLotNumber/);
+      assert.doesNotMatch(query.statement, /FULL JOIN|RIGHT JOIN|UNION|product_type_id|item_code|INSERT|UPDATE|DELETE/i);
+    }
+    assert.equal(db.calls[1].statement, db.calls[3].statement);
+  });
+});
+
+test('material lot availability returns an empty array for products without positive received lots and 404 for invalid or missing products', async () => {
+  const db = mockDatabase([[product], [], []]);
+  await withApi(db, async (request) => {
+    for (const id of ['bad', '-1', '0', '1.5', '2147483648']) {
+      assert.deepEqual(await request(`/api/products/${id}/material-lots`), { status: 404, body: { error: 'Product not found.' } });
+    }
+    assert.equal(db.calls.length, 0);
+    assert.deepEqual(await request('/api/products/17/material-lots'), { status: 200, body: [] });
+    assert.equal(db.calls.length, 2);
+    assert.deepEqual(await request('/api/products/999/material-lots'), { status: 404, body: { error: 'Product not found.' } });
+    assert.equal(db.calls.length, 3);
+  });
+});
+
 test('receiving locks the product and inserts the record in the same transaction', async () => {
   const db = mockDatabase([[{ id: 17 }], [{ id: 3 }]]);
   await withApi(db, async (request) => {
@@ -162,20 +209,90 @@ test('receiving locks the product and inserts the record in the same transaction
   });
 });
 
-test('usage saves an independent material lot and keeps the product lock through the write', async () => {
-  const db = mockDatabase([[{ id: 17 }], [product], [{ id: 4 }], [{ ...product, totalUsed: 3, availableBalance: 7 }]]);
+test('usage validates a received material lot under the product lock and preserves the independent MAK lot', async () => {
+  const db = mockDatabase([[{ id: 17 }], [product], [{ materialLotNumber: 'MATERIAL-LOT', availableQuantity: 3 }], [{ id: 4 }], [{ ...product, totalUsed: 3, availableBalance: 7 }]]);
   await withApi(db, async (request) => {
-    const result = await request('/api/transactions/usage', { productId: 17, usageDate: '2026-10-17', quantity: 3, materialLotNumber: ' NEW-MATERIAL-LOT ', makLotNumber: ' MAK-LOT ' });
+    const result = await request('/api/transactions/usage', { productId: 17, usageDate: '2026-10-17', quantity: 3, materialLotNumber: ' \tMATERIAL-LOT\r\n ', makLotNumber: ' MAK-LOT ' });
     assert.equal(result.status, 201);
     assert.equal(result.body.id, 4);
     assert.equal(result.body.product.availableBalance, 7);
-    assert.equal(db.calls.length, 4);
+    assert.equal(db.calls.length, 5);
     assert.match(db.calls[0].statement, /UPDLOCK, HOLDLOCK/);
-    assert.match(db.calls[2].statement, /INSERT INTO dbo\.usage_transactions/);
-    assert.equal(db.calls[2].parameters.materialLotNumber[1], 'NEW-MATERIAL-LOT');
-    assert.equal(db.calls[2].parameters.makLotNumber[1], 'MAK-LOT');
+    assert.match(db.calls[2].statement, /FROM received r LEFT JOIN used u/);
+    assert.equal(db.calls[2].parameters.productId[1], 17);
+    assert.match(db.calls[3].statement, /INSERT INTO dbo\.usage_transactions/);
+    assert.equal(db.calls[3].parameters.materialLotNumber[1], 'MATERIAL-LOT');
+    assert.equal(db.calls[3].parameters.makLotNumber[1], 'MAK-LOT');
     assert.ok(db.calls.every((call) => call.executor === db.token));
-    assert.ok(db.calls.every((call) => !/\btracked\b|material_lot_number\s+COLLATE/.test(call.statement)));
+  });
+});
+
+test('usage rejects unknown, exhausted, orphaned, other-product and differently cased material lots without inserting', async () => {
+  for (const materialLotNumber of ['UNKNOWN', 'EXHAUSTED', 'ORPHAN', 'OTHER-PRODUCT', 'lot']) {
+    const availableLots = ['EXHAUSTED', 'ORPHAN'].includes(materialLotNumber) ? [] : [{ materialLotNumber: 'LOT', availableQuantity: 10 }];
+    const db = mockDatabase([[{ id: 17 }], [product], availableLots]);
+    await withApi(db, async (request) => {
+      const result = await request('/api/transactions/usage', { productId: 17, usageDate: '2026-10-17', quantity: 1, materialLotNumber, makLotNumber: 'MAK-LOT' });
+      assert.deepEqual(result, { status: 400, body: { error: 'Select a material lot with available stock for this product, or select N/A.' } });
+      assert.equal(db.calls.length, 3);
+      assert.equal(db.calls[2].parameters.productId[1], 17);
+      assert.ok(db.calls.every((call) => call.executor === db.token));
+      assert.ok(db.calls.every((call) => !/INSERT INTO dbo\.usage_transactions/.test(call.statement)));
+    });
+  }
+});
+
+test('usage rejects quantities above the selected lot balance even when total product stock is sufficient', async () => {
+  const db = mockDatabase([[{ id: 17 }], [product], [{ materialLotNumber: 'LOT', availableQuantity: 2.5 }]]);
+  await withApi(db, async (request) => {
+    const result = await request('/api/transactions/usage', { productId: 17, usageDate: '2026-10-17', quantity: 3, materialLotNumber: ' LOT ', makLotNumber: 'MAK-LOT' });
+    assert.deepEqual(result, { status: 400, body: { error: 'Insufficient material lot inventory. Available for LOT: 2.5 Pcs.' } });
+    assert.equal(db.calls.length, 3);
+    assert.ok(db.calls.every((call) => call.executor === db.token));
+    assert.ok(db.calls.every((call) => !/INSERT INTO dbo\.usage_transactions/.test(call.statement)));
+  });
+});
+
+test('availability listing and usage validation reuse the same lot query', async () => {
+  const lots = [{ materialLotNumber: 'LOT', availableQuantity: 10 }];
+  const db = mockDatabase([[product], lots, [{ id: 17 }], [product], lots, [{ id: 4 }], [{ ...product, availableBalance: 9 }]]);
+  await withApi(db, async (request) => {
+    assert.equal((await request('/api/products/17/material-lots')).status, 200);
+    assert.equal((await request('/api/transactions/usage', { productId: 17, usageDate: '2026-10-17', quantity: 1, materialLotNumber: 'LOT', makLotNumber: 'MAK-LOT' })).status, 201);
+    assert.equal(db.calls[1].statement, db.calls[4].statement);
+    assert.deepEqual(db.calls[1].parameters, db.calls[4].parameters);
+    assert.equal(db.calls[1].executor, undefined);
+    assert.equal(db.calls[4].executor, db.token);
+  });
+});
+
+test('usage holds the transaction executor across the lock, availability reads and asynchronous insert', async () => {
+  const db = mockDatabase([[{ id: 17 }], [product], [{ materialLotNumber: 'LOT', availableQuantity: 10 }], [{ id: 4 }], [{ ...product, availableBalance: 9 }]]);
+  let transactionActive = false;
+  const query = db.query.bind(db);
+  db.transaction = async (work) => {
+    transactionActive = true;
+    try { return await work(db.token); }
+    finally { transactionActive = false; }
+  };
+  db.query = async (statement, parameters, executor) => {
+    if (statement.includes('FROM dbo.user_sessions s JOIN dbo.app_users u')) return query(statement, parameters, executor);
+    assert.equal(transactionActive, true);
+    assert.equal(executor, db.token);
+    if (statement.includes('INSERT INTO dbo.usage_transactions')) {
+      assert.equal(db.calls.length, 3);
+      assert.match(db.calls[0].statement, /UPDLOCK, HOLDLOCK/);
+      assert.match(db.calls[2].statement, /FROM received r LEFT JOIN used u/);
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(transactionActive, true);
+    }
+    return query(statement, parameters, executor);
+  };
+  await withApi(db, async (request) => {
+    assert.equal((await request('/api/transactions/usage', { productId: 17, usageDate: '2026-10-17', quantity: 1, materialLotNumber: 'LOT', makLotNumber: 'MAK-LOT' })).status, 201);
+    assert.equal(transactionActive, false);
+    assert.equal(db.calls.length, 5);
+    assert.ok(db.calls.every((call) => call.executor === db.token));
   });
 });
 
@@ -212,7 +329,7 @@ test('insufficient product stock prevents usage regardless of the entered materi
 
 test('receiving and usage accept omitted, null, blank and whitespace-only optional material lots', async () => {
   for (const kind of ['receiving', 'usage']) {
-    for (const materialLotNumber of [undefined, null, '', ' \t\r\n ']) {
+    for (const materialLotNumber of [undefined, null, '', ' \t\r\n ', '\u00a0\u2000\u2028\ufeff']) {
       const db = mockDatabase(kind === 'receiving' ? [[{ id: 17 }], [{ id: 3 }]]
         : [[{ id: 17 }], [product], [{ id: 3 }], [{ ...product, availableBalance: 5 }]]);
       await withApi(db, async (request) => {
@@ -225,8 +342,37 @@ test('receiving and usage accept omitted, null, blank and whitespace-only option
         assert.equal(insert.parameters.materialLotNumber[1], null);
         if (kind === 'receiving') assert.equal(insert.parameters.makReleaseNumber[1], null);
         else assert.equal(insert.parameters.makLotNumber[1], 'MAK-LOT');
+        assert.equal(db.calls.length, kind === 'receiving' ? 2 : 4);
+        assert.ok(db.calls.every((call) => !call.statement.includes('FROM received r LEFT JOIN used u')));
       });
     }
+  }
+});
+
+test('N/A material lots bypass only lot validation and still reject usage above product stock', async () => {
+  for (const materialLotNumber of [undefined, null, '', ' \t\r\n ']) {
+    const db = mockDatabase([[{ id: 17 }], [{ ...product, availableBalance: 2 }]]);
+    await withApi(db, async (request) => {
+      const result = await request('/api/transactions/usage', { productId: 17, usageDate: '2026-10-17', quantity: 3, materialLotNumber, makLotNumber: 'MAK-LOT' });
+      assert.deepEqual(result, { status: 400, body: { error: 'Insufficient inventory. Available: 2 Pcs.' } });
+      assert.equal(db.calls.length, 2);
+      assert.ok(db.calls.every((call) => call.executor === db.token));
+    });
+  }
+});
+
+test('receiving and usage reject missing products under the lock without checking lots or inserting', async () => {
+  for (const kind of ['receiving', 'usage']) {
+    const db = mockDatabase([[]]);
+    await withApi(db, async (request) => {
+      const result = await request(`/api/transactions/${kind}`, {
+        productId: 17, [`${kind}Date`]: '2026-10-17', quantity: 1, materialLotNumber: 'LOT', makLotNumber: 'MAK-LOT',
+      });
+      assert.deepEqual(result, { status: 404, body: { error: 'Product not found.' } });
+      assert.equal(db.calls.length, 1);
+      assert.match(db.calls[0].statement, /UPDLOCK, HOLDLOCK/);
+      assert.equal(db.calls[0].executor, db.token);
+    });
   }
 });
 
@@ -337,14 +483,17 @@ test('type history query count stays constant for a large product catalog and fa
   });
 });
 
-test('type history export requires authentication', async () => {
+test('type history export and material lot availability require authentication', async () => {
   const db = mockDatabase();
   const server = createApp(db, { serveClient: false }).listen(0, '127.0.0.1');
   await new Promise((resolve) => server.once('listening', resolve));
   try {
-    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/product-types/1/history`);
-    assert.equal(response.status, 401);
-    assert.equal(db.calls.length, 0);
+    for (const route of ['/api/product-types/1/history', '/api/products/17/material-lots']) {
+      const response = await fetch(`http://127.0.0.1:${server.address().port}${route}`);
+      assert.equal(response.status, 401);
+      assert.deepEqual(await response.json(), { error: 'Please sign in to continue.' });
+      assert.equal(db.calls.length, 0);
+    }
   } finally { await new Promise((resolve) => server.close(resolve)); }
 });
 

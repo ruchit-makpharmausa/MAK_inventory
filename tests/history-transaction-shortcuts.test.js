@@ -62,16 +62,21 @@ for (const kind of ['receiving', 'usage']) {
       assert.ok(dialog.includes(`${product.makItemCode} · ${product.itemCode} · ${product.productType}`));
       assert.ok(dialog.includes(`Available: ${product.availableBalance} ${product.unit}`));
       assert.match(dialog, /name="quantity"[^>]*required=""/);
-      assert.doesNotMatch(dialog, /<select|Sort products/);
+      assert.doesNotMatch(dialog, /<select name="productId"|Sort products/);
       assert.match(dialog, /<button type="button" class="button secondary">Cancel<\/button>/);
       assert.match(dialog, /aria-label="Close dialog"/);
       assert.match(dialog, /name="materialLotNumber"/);
-      assert.doesNotMatch(dialog.match(/<input[^>]*name="materialLotNumber"[^>]*>/)?.[0], /required/);
+      const lotField = dialog.match(/<(?:input|select)[^>]*name="materialLotNumber"[^>]*>/)?.[0];
+      assert.ok(lotField);
+      assert.doesNotMatch(lotField, /required/);
       if (kind === 'receiving') {
+        assert.match(lotField, /^<input/);
         assert.match(dialog, /name="receivingDate"/);
         assert.match(dialog, /name="makReleaseNumber"/);
         assert.doesNotMatch(dialog, /name="makLotNumber"/);
       } else {
+        assert.match(lotField, /^<select/);
+        assert.match(dialog, /<option value="" selected="">N\/A<\/option>/);
         assert.match(dialog, /name="usageDate"/);
         assert.match(dialog, /name="makLotNumber" required=""/);
         assert.doesNotMatch(dialog, /name="makReleaseNumber"/);

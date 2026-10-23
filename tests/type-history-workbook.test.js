@@ -26,31 +26,31 @@ function deepFreeze(value) {
   return value;
 }
 
-test('every selected product gets its own complete six-column ledger in natural MAK-code order', async () => {
+test('every selected product gets its own complete seven-column ledger in natural MAK-code order', async () => {
   const workbook = await roundTrip(report([
     history({ product: { ...product, id: 10, name: 'Tenth', makItemCode: 'MAK-10' }, receiving: [receipt({ makReleaseNumber: 'RN-TENTH', quantity: 10 })], usage: [] }),
     history({ product: { ...product, id: 2, name: 'Second', makItemCode: 'MAK-2' }, receiving: [receipt({ makReleaseNumber: 'RN-SECOND', quantity: 20 })], usage: [usage({ makLotNumber: 'SECOND-LOT', quantity: 5 })] }),
   ]));
   assert.deepEqual(workbook.worksheets.map((sheet) => sheet.name), ['MAK-2', 'MAK-10']);
   const [second, tenth] = workbook.worksheets;
-  assert.deepEqual(second.getRow(1).values.slice(1), ['Date', 'MAK Release Number', 'Item/Description', 'Qty', 'Used Qty', 'Used Against(MAK Lot No)']);
-  assert.equal(second.columnCount, 6);
+  assert.deepEqual(second.getRow(1).values.slice(1), ['Date', 'Material Lot Number', 'MAK Release Number', 'Item/Description', 'Qty', 'Used Qty', 'Used Against(MAK Lot No)']);
+  assert.equal(second.columnCount, 7);
   assert.equal(second.rowCount, 4);
   assert.equal(tenth.rowCount, 3);
-  assert.equal(second.getCell('B2').value, 'RN-SECOND');
-  assert.equal(second.getCell('C2').value, 'Second');
-  assert.equal(second.getCell('F3').value, '#SECOND-LOT');
-  assert.equal(second.getCell('D4').value, 15);
-  assert.equal(tenth.getCell('B2').value, 'RN-TENTH');
-  assert.equal(tenth.getCell('D3').value, 10);
-  assert.equal(tenth.getCell('F2').text, '');
+  assert.equal(second.getCell('C2').value, 'RN-SECOND');
+  assert.equal(second.getCell('D2').value, 'Second');
+  assert.equal(second.getCell('G3').value, '#SECOND-LOT');
+  assert.equal(second.getCell('E4').value, 15);
+  assert.equal(tenth.getCell('C2').value, 'RN-TENTH');
+  assert.equal(tenth.getCell('E3').value, 10);
+  assert.equal(tenth.getCell('G2').text, '');
   assert.equal(workbook.creator, 'MAK Inventory');
   for (const sheet of workbook.worksheets) {
     assert.equal(sheet.views[0].state, 'frozen');
     assert.equal(sheet.views[0].ySplit, 1);
-    assert.ok(sheet.getColumn(3).width >= 40);
-    assert.ok(sheet.getColumn(6).width >= 25);
-    assert.match(noteText(sheet.getCell('C1')), /Type: Packaging\nType ID: 7/);
+    assert.ok(sheet.getColumn(4).width >= 40);
+    assert.ok(sheet.getColumn(7).width >= 25);
+    assert.match(noteText(sheet.getCell('D1')), /Type: Packaging\nType ID: 7/);
   }
 });
 
@@ -62,10 +62,10 @@ test('separate type reports cannot leak other type or product transactions', asy
   })], { id: 8, name: 'Ingredients' }));
   assert.deepEqual(packaging.worksheets.map((sheet) => sheet.name), ['MAK-001']);
   assert.deepEqual(ingredients.worksheets.map((sheet) => sheet.name), ['ING-80']);
-  assert.equal(packaging.worksheets[0].getCell('B2').value, 'PACKAGING-ONLY');
-  assert.equal(ingredients.worksheets[0].getCell('F2').value, '#INGREDIENTS-ONLY');
-  assert.doesNotMatch(noteText(ingredients.worksheets[0].getCell('C1')), /Packaging|Carton/);
-  assert.doesNotMatch(noteText(packaging.worksheets[0].getCell('C1')), /Ingredients|Ingredient/);
+  assert.equal(packaging.worksheets[0].getCell('C2').value, 'PACKAGING-ONLY');
+  assert.equal(ingredients.worksheets[0].getCell('G2').value, '#INGREDIENTS-ONLY');
+  assert.doesNotMatch(noteText(ingredients.worksheets[0].getCell('D1')), /Packaging|Carton/);
+  assert.doesNotMatch(noteText(packaging.worksheets[0].getCell('D1')), /Ingredients|Ingredient/);
 });
 
 test('chronological dates, receipt-first ties, release numbers, and usage fields survive XLSX roundtrip', async () => {
@@ -78,40 +78,40 @@ test('chronological dates, receipt-first ties, release numbers, and usage fields
   assert.equal(sheet.getCell('A2').type, ExcelJS.ValueType.Date);
   assert.equal(sheet.getCell('A2').value.toISOString(), '2026-10-11T00:00:00.000Z');
   assert.equal(sheet.getCell('A2').numFmt, 'm/d/yy');
-  assert.equal(sheet.getCell('F2').value, '#EARLIER');
-  assert.equal(sheet.getCell('B3').value, '000001');
-  assert.equal(sheet.getCell('B3').type, ExcelJS.ValueType.String);
-  assert.equal(sheet.getCell('B4').value, '000002');
-  assert.equal(sheet.getCell('D4').value, 10);
-  assert.equal(sheet.getCell('F5').value, '#00001');
-  assert.equal(sheet.getCell('E5').value, 0.5);
-  assert.equal(sheet.getCell('F6').value, '#00002');
-  assert.equal(sheet.getCell('E6').value, 0.125);
+  assert.equal(sheet.getCell('G2').value, '#EARLIER');
+  assert.equal(sheet.getCell('C3').value, '000001');
+  assert.equal(sheet.getCell('C3').type, ExcelJS.ValueType.String);
+  assert.equal(sheet.getCell('C4').value, '000002');
+  assert.equal(sheet.getCell('E4').value, 10);
+  assert.equal(sheet.getCell('G5').value, '#00001');
+  assert.equal(sheet.getCell('F5').value, 0.5);
+  assert.equal(sheet.getCell('G6').value, '#00002');
+  assert.equal(sheet.getCell('F6').value, 0.125);
   assert.equal(sheet.getCell('A7').value.toISOString().slice(0, 10), '2026-10-14');
   for (const row of [3, 4, 7]) {
-    for (let column = 1; column <= 6; column++) assert.equal(sheet.getRow(row).getCell(column).font.bold, true);
-    assert.equal(sheet.getRow(row).getCell(5).value, null);
+    for (let column = 1; column <= 7; column++) assert.equal(sheet.getRow(row).getCell(column).font.bold, true);
+    assert.equal(sheet.getRow(row).getCell(6).value, null);
   }
   for (const row of [2, 5, 6]) {
-    assert.equal(sheet.getRow(row).getCell(2).text, '');
     assert.equal(sheet.getRow(row).getCell(3).text, '');
-    assert.equal(sheet.getRow(row).getCell(4).value, null);
-    for (const column of [5, 6]) assert.equal(sheet.getRow(row).getCell(column).font.color.argb, 'FFFF0000');
+    assert.equal(sheet.getRow(row).getCell(4).text, '');
+    assert.equal(sheet.getRow(row).getCell(5).value, null);
+    for (const column of [6, 7]) assert.equal(sheet.getRow(row).getCell(column).font.color.argb, 'FFFF0000');
   }
 });
 
 test('header and transaction notes preserve identifying metadata, leading zeros, lots, and remarks', async () => {
   const workbook = await roundTrip(report());
   const sheet = workbook.worksheets[0];
-  const metadata = noteText(sheet.getCell('C1'));
+  const metadata = noteText(sheet.getCell('D1'));
   for (const value of ['Product: Carton', 'Product ID: 1', 'Type: Packaging', 'Type ID: 7', 'Product Type: Packaging', 'Item Code: 000123', 'MAK Item Code: MAK-001', 'Unit: Pcs']) assert.ok(metadata.includes(value), value);
-  assert.equal(noteText(sheet.getCell('D1')), 'Unit: Pcs');
   assert.equal(noteText(sheet.getCell('E1')), 'Unit: Pcs');
-  assert.match(noteText(sheet.getCell('B2')), /MAK Release Number: 000001/);
-  assert.match(noteText(sheet.getCell('B2')), /Material lot number: REC-MAT-001/);
-  assert.match(noteText(sheet.getCell('B2')), /Remarks: Received stock/);
-  assert.match(noteText(sheet.getCell('F3')), /Material lot number: USE-MAT-001/);
-  assert.match(noteText(sheet.getCell('F3')), /Remarks: Production use/);
+  assert.equal(noteText(sheet.getCell('F1')), 'Unit: Pcs');
+  assert.match(noteText(sheet.getCell('C2')), /MAK Release Number: 000001/);
+  assert.match(noteText(sheet.getCell('C2')), /Material lot number: REC-MAT-001/);
+  assert.match(noteText(sheet.getCell('C2')), /Remarks: Received stock/);
+  assert.match(noteText(sheet.getCell('G3')), /Material lot number: USE-MAT-001/);
+  assert.match(noteText(sheet.getCell('G3')), /Remarks: Production use/);
 });
 
 test('closing balances are numeric and green, include units, and never hide zero', async () => {
@@ -123,19 +123,19 @@ test('closing balances are numeric and green, include units, and never hide zero
   const expected = [2400, 0, -12.125];
   for (const [index, sheet] of workbook.worksheets.entries()) {
     const closing = sheet.lastRow;
-    assert.equal(closing.getCell(3).value, 'Closing Balance');
-    assert.equal(closing.getCell(4).type, ExcelJS.ValueType.Number);
-    assert.equal(closing.getCell(4).value, expected[index]);
-    assert.equal(closing.getCell(4).alignment.horizontal, 'right');
-    assert.match(closing.getCell(4).numFmt, index === 0 ? /" Pcs"/ : /" kg"/);
-    assert.match(closing.getCell(4).numFmt.split(';')[2], /^0/);
-    for (let column = 1; column <= 6; column++) {
+    assert.equal(closing.getCell(4).value, 'Closing Balance');
+    assert.equal(closing.getCell(5).type, ExcelJS.ValueType.Number);
+    assert.equal(closing.getCell(5).value, expected[index]);
+    assert.equal(closing.getCell(5).alignment.horizontal, 'right');
+    assert.match(closing.getCell(5).numFmt, index === 0 ? /" Pcs"/ : /" kg"/);
+    assert.match(closing.getCell(5).numFmt.split(';')[2], /^0/);
+    for (let column = 1; column <= 7; column++) {
       assert.equal(closing.getCell(column).font.color.argb, 'FF008000');
       assert.equal(closing.getCell(column).font.bold, true);
       assert.equal(closing.getCell(column).fill.fgColor.argb, 'FFE2F0D9');
     }
   }
-  assert.match(workbook.worksheets[2].lastRow.getCell(4).numFmt, /^#,##0\.0##/);
+  assert.match(workbook.worksheets[2].lastRow.getCell(5).numFmt, /^#,##0\.0##/);
 });
 
 test('optional zero quantities display blank, integers have no trailing dot, and fractions keep three places', async () => {
@@ -144,14 +144,14 @@ test('optional zero quantities display blank, integers have no trailing dot, and
     usage: [usage({ quantity: 0 })],
   })]));
   const sheet = workbook.worksheets[0];
-  assert.equal(sheet.getCell('D2').value, 12000);
-  assert.equal(sheet.getCell('D2').numFmt, '#,##0;-#,##0;;@');
-  assert.equal(sheet.getCell('D3').value, 12.125);
-  assert.equal(sheet.getCell('D3').numFmt, '#,##0.0##;-#,##0.0##;;@');
-  assert.equal(sheet.getCell('D4').value, 0);
-  assert.equal(sheet.getCell('D5').value, 0);
-  assert.equal(sheet.getCell('E6').value, 0);
-  for (const address of ['D4', 'D5', 'E6']) assert.equal(sheet.getCell(address).numFmt.split(';')[2], '');
+  assert.equal(sheet.getCell('E2').value, 12000);
+  assert.equal(sheet.getCell('E2').numFmt, '#,##0;-#,##0;;@');
+  assert.equal(sheet.getCell('E3').value, 12.125);
+  assert.equal(sheet.getCell('E3').numFmt, '#,##0.0##;-#,##0.0##;;@');
+  assert.equal(sheet.getCell('E4').value, 0);
+  assert.equal(sheet.getCell('E5').value, 0);
+  assert.equal(sheet.getCell('F6').value, 0);
+  for (const address of ['E4', 'E5', 'F6']) assert.equal(sheet.getCell(address).numFmt.split(';')[2], '');
 });
 
 test('unsafe, reserved, duplicate, and missing MAK codes never drop products or create invalid sheet names', async () => {
@@ -176,7 +176,7 @@ test('unsafe, reserved, duplicate, and missing MAK codes never drop products or 
     assert.notEqual(name.toLowerCase(), 'history');
   }
   for (const expected of ['A-B', 'A-B (2)', 'same', 'SAME (2)', 'History Items', 'Quoted', '000009', 'Fallback Name', 'Product-11']) assert.ok(names.includes(expected), expected);
-  const metadata = workbook.worksheets.map((sheet) => noteText(sheet.getCell('C1')));
+  const metadata = workbook.worksheets.map((sheet) => noteText(sheet.getCell('D1')));
   for (const value of products) assert.equal(metadata.filter((note) => note.split('\n').includes(`Product ID: ${value.id}`)).length, 1);
 });
 
@@ -187,8 +187,8 @@ test('repeated product IDs and shared product references still get separate ledg
     history({ product: { ...product }, receiving: [receipt({ quantity: 30, makReleaseNumber: 'THIRD' })], usage: [] }),
   ]));
   assert.deepEqual(workbook.worksheets.map((sheet) => sheet.name), ['MAK-001', 'MAK-001 (2)', 'MAK-001 (3)']);
-  assert.deepEqual(workbook.worksheets.map((sheet) => sheet.getCell('B2').value), ['FIRST', 'SECOND', 'THIRD']);
-  assert.deepEqual(workbook.worksheets.map((sheet) => sheet.lastRow.getCell(4).value), [10, 20, 30]);
+  assert.deepEqual(workbook.worksheets.map((sheet) => sheet.getCell('C2').value), ['FIRST', 'SECOND', 'THIRD']);
+  assert.deepEqual(workbook.worksheets.map((sheet) => sheet.lastRow.getCell(5).value), [10, 20, 30]);
 });
 
 test('literal formula-like names, releases, lots, and units remain data rather than formulas', async () => {
@@ -197,19 +197,19 @@ test('literal formula-like names, releases, lots, and units remain data rather t
     receiving: [receipt({ makReleaseNumber: '=2+2' })],
     usage: [usage({ makLotNumber: '=3+3' })],
   })]));
-  assert.match(source.worksheets[0].lastRow.getCell(4).numFmt, /kg \\"net\\" \\\\ unit/);
+  assert.match(source.worksheets[0].lastRow.getCell(5).numFmt, /kg \\"net\\" \\\\ unit/);
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(await source.xlsx.writeBuffer());
   const sheet = workbook.worksheets[0];
   assert.equal(sheet.name, '=1+1');
-  assert.equal(sheet.getCell('C2').value, '=SUM(1,2)');
-  assert.equal(sheet.getCell('B2').value, '=2+2');
-  assert.equal(sheet.getCell('F3').value, '#=3+3');
-  for (const address of ['C2', 'B2', 'F3']) {
+  assert.equal(sheet.getCell('D2').value, '=SUM(1,2)');
+  assert.equal(sheet.getCell('C2').value, '=2+2');
+  assert.equal(sheet.getCell('G3').value, '#=3+3');
+  for (const address of ['D2', 'C2', 'G3']) {
     assert.equal(sheet.getCell(address).type, ExcelJS.ValueType.String);
     assert.equal(sheet.getCell(address).formula, undefined);
   }
-  assert.equal(noteText(sheet.getCell('D1')), 'Unit: kg "net" \\ unit');
+  assert.equal(noteText(sheet.getCell('E1')), 'Unit: kg "net" \\ unit');
 });
 
 test('empty products retain a header and visible zero closing balance even without optional metadata', async () => {
@@ -218,11 +218,11 @@ test('empty products retain a header and visible zero closing balance even witho
   assert.equal(sheet.name, 'Product-23');
   assert.equal(sheet.rowCount, 2);
   assert.equal(sheet.getCell('A2').value, null);
-  assert.equal(sheet.getCell('C2').value, 'Closing Balance');
-  assert.equal(sheet.getCell('D2').value, 0);
-  assert.equal(sheet.getCell('D2').numFmt, '#,##0;-#,##0;0;@');
+  assert.equal(sheet.getCell('D2').value, 'Closing Balance');
+  assert.equal(sheet.getCell('E2').value, 0);
+  assert.equal(sheet.getCell('E2').numFmt, '#,##0;-#,##0;0;@');
   const omittedArrays = await roundTrip(report([{ product }]));
-  assert.equal(omittedArrays.worksheets[0].lastRow.getCell(4).value, 0);
+  assert.equal(omittedArrays.worksheets[0].lastRow.getCell(5).value, 0);
 });
 
 test('empty types produce a valid type-named header-only worksheet, not fake products', async () => {
@@ -231,12 +231,29 @@ test('empty types produce a valid type-named header-only worksheet, not fake pro
     assert.equal(workbook.worksheets.length, 1);
     const sheet = workbook.worksheets[0];
     assert.equal(sheet.rowCount, 1);
-    assert.equal(sheet.columnCount, 6);
+    assert.equal(sheet.columnCount, 7);
     assert.equal(sheet.views[0].ySplit, 1);
-    assert.doesNotMatch(noteText(sheet.getCell('C1')), /Product:|Product ID:/);
-    assert.match(noteText(sheet.getCell('C1')), /Type ID:/);
+    assert.doesNotMatch(noteText(sheet.getCell('D1')), /Product:|Product ID:/);
+    assert.match(noteText(sheet.getCell('D1')), /Type ID:/);
   }
   assert.equal((await roundTrip(report([]))).worksheets[0].name, 'Packaging');
+});
+
+test('material lots occupy one column for received and used rows, with N/A only for unknown usage', async () => {
+  const workbook = await roundTrip(report([history({
+    receiving: [receipt({ materialLotNumber: '000MAT' }), receipt({ id: 2, materialLotNumber: null })],
+    usage: [usage({ materialLotNumber: '000MAT' }), usage({ id: 2, materialLotNumber: null })],
+  })]));
+  const sheet = workbook.worksheets[0];
+  assert.equal(sheet.getCell('B1').value, 'Material Lot Number');
+  assert.deepEqual([2, 3, 4, 5].map((row) => sheet.getCell(`B${row}`).text), ['000MAT', '', '000MAT', 'N/A']);
+  assert.equal(sheet.getCell('C2').value, '000001');
+  assert.equal(sheet.getCell('G4').value, '#000083');
+  for (let row = 1; row <= sheet.rowCount; row++) {
+    for (let column = 1; column <= 7; column++) assert.equal(sheet.getRow(row).getCell(column).font.size, 12);
+  }
+  assert.equal(sheet.getColumn(2).alignment.wrapText, true);
+  assert.ok(sheet.getRow(1).height >= 36);
 });
 
 test('invalid dates and quantities reject the whole export, including a later product', async () => {

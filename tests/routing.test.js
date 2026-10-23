@@ -6,7 +6,7 @@ import test from 'node:test';
 import { createApp } from '../server/app.js';
 import { loginDestination, navigation } from '../src/lib/routes.js';
 
-const pagePaths = ['/dashboard', '/products', '/receiving', '/usage', '/inv_history', '/admin'];
+const pagePaths = ['/dashboard', '/products', '/receiving', '/usage', '/inv_history', '/lot-inventory', '/admin'];
 
 test('workspace navigation defines distinct page URLs', () => {
   assert.deepEqual(navigation.map((item) => item.path), pagePaths);
@@ -18,6 +18,7 @@ test('post-login destinations preserve allowed pages, product history selection,
   for (const pathname of pagePaths.filter((value) => value !== '/admin')) assert.equal(loginDestination(pathname), pathname);
   assert.equal(loginDestination('/inv_history?productId=17#receiving'), '/inv_history?productId=17#receiving');
   assert.equal(loginDestination('/history?productId=17'), '/inv_history?productId=17');
+  assert.equal(loginDestination('/lot-inventory?productId=17&lot=000LOT'), '/lot-inventory?productId=17&lot=000LOT');
   assert.equal(loginDestination('/products/'), '/products');
   assert.equal(loginDestination('/admin', true), '/admin');
   assert.equal(loginDestination('/admin', false), '/dashboard');

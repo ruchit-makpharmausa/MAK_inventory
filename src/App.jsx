@@ -9,6 +9,7 @@ import ProductsPage from './pages/products/ProductsPage.jsx';
 import ReceivingPage from './pages/receiving/ReceivingPage.jsx';
 import UsagePage from './pages/usage/UsagePage.jsx';
 import InventoryHistoryPage from './pages/history/InventoryHistoryPage.jsx';
+import LotInventoryPage from './pages/lots/LotInventoryPage.jsx';
 import AdminPage from './pages/admin/AdminPage.jsx';
 import NotFoundPage from './pages/not-found/NotFoundPage.jsx';
 import api from './lib/api.js';
@@ -129,7 +130,10 @@ function App() {
         await exportTypeHistoryWorkbook(report);
         setMessage({ kind: 'success', text: `${report.type.name} product history workbook downloaded.` });
       } else {
-        await exportInventoryWorkbook(allProducts, types);
+        const [receiving, usage] = await Promise.all([
+          api('/api/transactions/receiving'), api('/api/transactions/usage'),
+        ]);
+        await exportInventoryWorkbook(allProducts, types, { receiving, usage });
         setMessage({ kind: 'success', text: 'Inventory Excel workbook downloaded.' });
       }
     } catch {
@@ -201,6 +205,7 @@ function App() {
           <Route path="/receiving" element={<ReceivingPage products={allProducts} types={types} onSaved={onTransactionSaved} />} />
           <Route path="/usage" element={<UsagePage products={allProducts} types={types} onSaved={onTransactionSaved} />} />
           <Route path="/inv_history" element={<InventoryHistoryPage products={allProducts} types={types} onSaved={onTransactionSaved} />} />
+          <Route path="/lot-inventory" element={<LotInventoryPage products={allProducts} types={types} />} />
           <Route path="/history" element={<Navigate to={`/inv_history${location.search}${location.hash}`} replace />} />
           <Route path="/admin" element={user?.isAdmin ? <AdminPage api={api} /> : <Navigate to="/dashboard" replace />} />
           <Route path="*" element={<NotFoundPage />} />

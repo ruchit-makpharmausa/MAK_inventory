@@ -4,6 +4,7 @@ export const navigation = [
   { path: '/receiving', label: 'Receiving', icon: '↓' },
   { path: '/usage', label: 'Usage', icon: '↑' },
   { path: '/inv_history', label: 'Inventory History', icon: '◷' },
+  { path: '/lot-inventory', label: 'Lot Inventory', icon: '▦' },
   { path: '/admin', label: 'Admin Panel', icon: '⚙', adminOnly: true },
 ];
 

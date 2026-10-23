@@ -61,7 +61,7 @@ export default function TransactionDialog({ kind, product, onClose, onSaved }) {
     {error && <div className="form-error" role="alert">{error}</div>}
     <form onSubmit={submit}>
       <fieldset disabled={saving}>
-        <TransactionFields kind={kind} />
+        <TransactionFields kind={kind} productId={String(product.id)} unit={product.unit} />
       </fieldset>
       <div className="modal-actions">
         <button type="button" className="button secondary" onClick={close} disabled={saving}>Cancel</button>

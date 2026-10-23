@@ -1,6 +1,6 @@
 import { numericQuantity } from './excel.js';
 
-export const productHistoryHeaders = ['Date', 'Item/Description', 'Qty', 'Used Qty', 'Used Against(MAK Lot No)'];
+export const productHistoryHeaders = ['Date', 'Material Lot Number', 'Item/Description', 'Qty', 'Used Qty', 'Used Against(MAK Lot No)'];
 
 function transactionDate(value) {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error('History contains an invalid transaction date.');
@@ -31,6 +31,7 @@ export function productHistoryEntries(history) {
       const amount = numericQuantity(row.quantity);
       return {
         date, receiving,
+        materialLotNumber: String(row.materialLotNumber ?? '').trim() || (receiving ? '' : 'N/A'),
         releaseNumber: receiving ? String(row.makReleaseNumber ?? '') : '',
         description: receiving ? String(history.product.name ?? '') : '',
         receivedQuantity: receiving ? amount : null,

@@ -55,7 +55,8 @@ test('dashboard export menu lists all registered types and invokes distinct summ
     const open = render();
     assert.match(open, /aria-expanded="true"/);
     assert.match(open, /All product types/);
-    assert.match(open, /Stock summary/);
+    assert.match(open, /Lot-wise received, used &amp; balance/);
+    assert.match(open, /Lot-wise received, used &amp; balance/);
     for (const type of types) assert.ok(open.includes(`>${type.name}</button>`));
     assert.match(open, /Product-wise history by type/);
     assert.doesNotMatch(render('Bulk'), /id="dashboard-export-options"/);

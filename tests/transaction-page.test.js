@@ -28,12 +28,18 @@ test('material lots are optional in both forms and receiving keeps a separate op
     const usage = render('usage');
     for (const html of [receiving, usage]) {
       assert.match(html, /<label>Material lot number <span class="muted-label">\(optional\)<\/span>/);
-      const lotInput = html.match(/<input[^>]*name="materialLotNumber"[^>]*>/)?.[0];
-      assert.ok(lotInput);
-      assert.doesNotMatch(lotInput, /\brequired=/);
-      assert.match(lotInput, /maxLength="255"/);
-      assert.match(lotInput, /placeholder="Enter material lot number"/);
     }
+    const lotInput = receiving.match(/<input[^>]*name="materialLotNumber"[^>]*>/)?.[0];
+    assert.ok(lotInput);
+    assert.doesNotMatch(lotInput, /\brequired=/);
+    assert.match(lotInput, /maxLength="255"/);
+    assert.match(lotInput, /placeholder="Enter material lot number"/);
+    const lotSelect = usage.match(/<select[^>]*name="materialLotNumber"[^>]*>[\s\S]*?<\/select>/)?.[0];
+    assert.ok(lotSelect);
+    assert.doesNotMatch(lotSelect, /\brequired=/);
+    assert.match(lotSelect, /<option value="" selected="">N\/A<\/option>/);
+    assert.match(lotSelect, /disabled=""/);
+    assert.doesNotMatch(usage, /<input name="materialLotNumber"/);
     assert.match(usage, /<input name="makLotNumber" required=""/);
     assert.doesNotMatch(usage, /MAK Release Number|lot-tracked/);
   } finally {

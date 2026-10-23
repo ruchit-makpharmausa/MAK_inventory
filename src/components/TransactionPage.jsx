@@ -76,7 +76,7 @@ export default function TransactionPage({ kind, products, types = [], onSaved, i
               {matchingProducts.map((p) => <option key={p.id} value={p.id}>{p.makItemCode || '—'} · {p.itemCode} — {p.name} ({p.productType}) ({quantity(p.availableBalance)} {p.unit} available)</option>)}
             </select>
           </label>
-          <TransactionFields kind={kind} />
+          <TransactionFields kind={kind} productId={productId} unit={products.find((product) => String(product.id) === productId)?.unit} />
           <button className="button primary submit-button" disabled={saving || !productId}>
             {saving ? 'Saving…' : receiving ? 'Save receiving' : 'Save usage'}
           </button>

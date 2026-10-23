@@ -37,7 +37,7 @@ export default function DashboardExportMenu({ types, onExport, exporting }) {
       ⇩ <span>{exporting ? 'Exporting…' : 'Export Excel'}</span><span aria-hidden="true">▾</span>
     </button>
     {open && !exporting && <div id="dashboard-export-options" className="dashboard-export-options" role="group" aria-label="Excel export options">
-      <button type="button" onClick={() => choose('')}>All product types <small>Stock summary · one sheet per type</small></button>
+      <button type="button" onClick={() => choose('')}>All product types <small>Lot-wise received, used &amp; balance</small></button>
       <p>Product-wise history by type</p>
       {types.map((type) => <button type="button" key={type.id} onClick={() => choose(String(type.id))}>{type.name}</button>)}
       {!types.length && <p>No product types available.</p>}

@@ -1,6 +1,7 @@
 import { today } from '../lib/format.js';
+import UsageMaterialLotSelect from './UsageMaterialLotSelect.jsx';
 
-export default function TransactionFields({ kind }) {
+export default function TransactionFields({ kind, productId = '', unit = '' }) {
   const receiving = kind === 'receiving';
   return <>
     <label>{receiving ? 'Receiving' : 'Usage'} date <span className="required">*</span>
@@ -12,9 +13,9 @@ export default function TransactionFields({ kind }) {
     {receiving && <label>MAK Release Number <span className="muted-label">(optional)</span>
       <input name="makReleaseNumber" maxLength={255} placeholder="Enter MAK Release Number" />
     </label>}
-    <label>Material lot number <span className="muted-label">(optional)</span>
+    {receiving ? <label>Material lot number <span className="muted-label">(optional)</span>
       <input name="materialLotNumber" maxLength={255} placeholder="Enter material lot number" />
-    </label>
+    </label> : <UsageMaterialLotSelect key={productId} productId={productId} unit={unit} />}
     {!receiving && <label>MAK lot number <span className="required">*</span>
       <input name="makLotNumber" required placeholder="e.g. M260001" />
     </label>}

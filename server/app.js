@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import database, { connectionFailure } from './database.js';
 import { mountAuthentication } from './auth.js';
 import { mountUserAdministration } from './users.js';
+import { mountLotInventory } from './lot-inventory.js';
 
 const productSelect = `
   SELECT p.id, p.product_type_id AS productTypeId, pt.name AS productType,
@@ -16,6 +17,27 @@ const productSelect = `
   FROM dbo.products p JOIN dbo.product_types pt ON pt.id = p.product_type_id
   LEFT JOIN (SELECT product_id, SUM(quantity) AS total_received FROM dbo.receiving_transactions GROUP BY product_id) r ON r.product_id = p.id
   LEFT JOIN (SELECT product_id, SUM(quantity) AS total_used FROM dbo.usage_transactions GROUP BY product_id) u ON u.product_id = p.id
+`;
+// Match String.trim() for older ledger values as well as newly normalized API inputs.
+const lotWhitespace = '\u0009\u000a\u000b\u000c\u000d\u0020\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff';
+const materialLotsSelect = `
+  WITH received AS (
+    SELECT TRIM(@lotWhitespace FROM material_lot_number) COLLATE Latin1_General_100_BIN2 AS materialLotNumber,
+           SUM(quantity) AS quantity
+    FROM dbo.receiving_transactions
+    WHERE product_id = @productId AND material_lot_number IS NOT NULL
+    GROUP BY TRIM(@lotWhitespace FROM material_lot_number) COLLATE Latin1_General_100_BIN2
+  ), used AS (
+    SELECT TRIM(@lotWhitespace FROM material_lot_number) COLLATE Latin1_General_100_BIN2 AS materialLotNumber,
+           SUM(quantity) AS quantity
+    FROM dbo.usage_transactions
+    WHERE product_id = @productId AND material_lot_number IS NOT NULL
+    GROUP BY TRIM(@lotWhitespace FROM material_lot_number) COLLATE Latin1_General_100_BIN2
+  )
+  SELECT r.materialLotNumber, r.quantity - COALESCE(u.quantity, 0) AS availableQuantity
+  FROM received r LEFT JOIN used u ON u.materialLotNumber = r.materialLotNumber
+  WHERE r.materialLotNumber <> N'' AND r.quantity - COALESCE(u.quantity, 0) > 0
+  ORDER BY r.materialLotNumber
 `;
 const requiredText = (value) => typeof value === 'string' && value.trim().length > 0;
 const optionalText = (value) => value == null || typeof value === 'string';
@@ -78,6 +100,12 @@ export function createApp(db = database, {
     const result = await db.query('SELECT id FROM dbo.products WITH (UPDLOCK, HOLDLOCK) WHERE id = @productId', { productId: [sql.Int, Number(productId)] }, executor);
     return result.recordset.length > 0;
   };
+  const getMaterialLots = async (productId, executor) => {
+    const result = await db.query(materialLotsSelect, {
+      productId: [sql.Int, Number(productId)], lotWhitespace: [sql.NVarChar(25), lotWhitespace],
+    }, executor);
+    return result.recordset;
+  };
 
   app.get('/api/health', route(async (_req, res) => {
     await db.getPool();
@@ -86,6 +114,7 @@ export function createApp(db = database, {
   }));
   mountAuthentication(app, db);
   mountUserAdministration(app, db);
+  mountLotInventory(app, db);
 
   app.get('/api/product-types', route(async (_req, res) => {
     res.json((await db.query('SELECT id, name FROM dbo.product_types ORDER BY name')).recordset);
@@ -223,6 +252,16 @@ export function createApp(db = database, {
       if (req.body.quantity > balance) {
         return { status: 400, error: `Insufficient inventory. Available: ${balance} ${product.unit}.` };
       }
+      const materialLotNumber = inputs.materialLotNumber[1];
+      if (materialLotNumber !== null) {
+        const lots = await getMaterialLots(req.body.productId, executor);
+        const lot = lots.find((row) => row.materialLotNumber === materialLotNumber);
+        if (!lot) return { status: 400, error: 'Select a material lot with available stock for this product, or select N/A.' };
+        const lotBalance = Number(lot.availableQuantity);
+        if (req.body.quantity > lotBalance) {
+          return { status: 400, error: `Insufficient material lot inventory. Available for ${materialLotNumber}: ${lotBalance} ${product.unit}.` };
+        }
+      }
       const inserted = await db.query(`
         INSERT INTO dbo.usage_transactions (product_id, usage_date, quantity, material_lot_number, mak_lot_number, remarks, created_at)
         VALUES (@productId, @date, @quantity, @materialLotNumber, @makLotNumber, @remarks, SYSUTCDATETIME());
@@ -232,6 +271,11 @@ export function createApp(db = database, {
     });
     if (result.error) return fail(res, result.status, result.error);
     res.status(201).json(result);
+  }));
+  app.get('/api/products/:id/material-lots', route(async (req, res) => {
+    if (!validId(req.params.id)) return fail(res, 404, 'Product not found.');
+    if (!await getProduct(req.params.id)) return fail(res, 404, 'Product not found.');
+    res.json(await getMaterialLots(req.params.id));
   }));
   app.get('/api/products/:id/history', route(async (req, res) => {
     if (!validId(req.params.id)) return fail(res, 404, 'Product not found.');
