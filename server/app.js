@@ -183,7 +183,7 @@ export function createApp(db = database, {
       `, productInputs(req.body));
       res.status(201).json(await getProduct(result.recordset[0].id));
     } catch (error) {
-      if (duplicate(error)) return fail(res, 409, 'That item code already exists for the selected product type.');
+      if (duplicate(error)) return fail(res, 409, 'That MAK Item Code already exists for the selected product type.');
       if (error.number === 547) return fail(res, 400, 'Select a valid product type.');
       throw error;
     }
@@ -202,7 +202,7 @@ export function createApp(db = database, {
       if (!result.recordset[0].matched) return fail(res, 404, 'Product not found.');
       res.json(await getProduct(req.params.id));
     } catch (error) {
-      if (duplicate(error)) return fail(res, 409, 'That item code already exists for the selected product type.');
+      if (duplicate(error)) return fail(res, 409, 'That MAK Item Code already exists for the selected product type.');
       if (error.number === 547) return fail(res, 400, 'Select a valid product type.');
       throw error;
     }

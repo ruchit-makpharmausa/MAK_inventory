@@ -108,11 +108,21 @@ test('search is parameterized and duplicates and foreign keys retain validation 
     assert.ok(!db.calls[0].statement.includes(search));
     const conflict = await request('/api/products', values);
     assert.equal(conflict.status, 409);
-    assert.equal(conflict.body.error, 'That item code already exists for the selected product type.');
+    assert.equal(conflict.body.error, 'That MAK Item Code already exists for the selected product type.');
     assert.equal((await request('/api/products', values)).status, 400);
     assert.equal((await request('/api/products', { ...values, productTypeId: -1 })).status, 400);
     assert.equal((await request('/api/products?typeId=bad')).status, 400);
     assert.equal(db.calls.length, 3);
+  });
+});
+
+test('products may reuse an item code when their MAK Item Code is different', async () => {
+  const db = mockDatabase([[{ id: 18 }], [product]]);
+  await withApi(db, async (request) => {
+    const result = await request('/api/products', { ...values, makItemCode: 'MAK-002' });
+    assert.equal(result.status, 201);
+    assert.equal(db.calls[0].parameters.itemCode[1], 'LB-001');
+    assert.equal(db.calls[0].parameters.makItemCode[1], 'MAK-002');
   });
 });
 
@@ -155,7 +165,7 @@ test('editing can change the product type without changing its name, item code, 
   });
 });
 
-test('create and edit report same-type item code conflicts from unique constraints and indexes', async () => {
+test('create and edit report same-type MAK Item Code conflicts from unique constraints and indexes', async () => {
   for (const number of [2601, 2627]) {
     const error = Object.assign(new Error('private-constraint-details'), { number });
     const db = mockDatabase([error, error]);
@@ -163,7 +173,7 @@ test('create and edit report same-type item code conflicts from unique constrain
       for (const [url, method] of [['/api/products', 'POST'], ['/api/products/17', 'PUT']]) {
         const result = await request(url, values, method);
         assert.equal(result.status, 409);
-        assert.deepEqual(result.body, { error: 'That item code already exists for the selected product type.' });
+        assert.deepEqual(result.body, { error: 'That MAK Item Code already exists for the selected product type.' });
       }
     });
   }

@@ -31,7 +31,7 @@ test('Product Master counts all product records independently of search and hand
   }
 });
 
-test('product editor keeps shared names and codes unchanged and explains per-type uniqueness', async () => {
+test('product editor permits reused Item Codes and explains per-type MAK Item Code uniqueness', async () => {
   const vite = await createServer({ optimizeDeps: { noDiscovery: true, include: [] }, server: { middlewareMode: true, hmr: { server: createHttpServer() }, watch: null }, appType: 'custom' });
   try {
     const { default: ProductModal } = await vite.ssrLoadModule('/src/components/ProductModal.jsx');
@@ -41,7 +41,8 @@ test('product editor keeps shared names and codes unchanged and explains per-typ
       }));
       assert.match(html, /name="name"[^>]*value="Qunol Ultra CoQ10 100mg 120ct"/);
       assert.match(html, /name="itemCode"[^>]*aria-describedby="item-code-help"[^>]*value="10935-SEG-20-0120"/);
-      assert.match(html, /id="item-code-help"[^>]*>Must be unique within the selected product type\./);
+      assert.match(html, /id="item-code-help"[^>]*>May be reused for other products\./);
+      assert.match(html, /id="mak-item-code-help"[^>]*>Must be unique within the selected product type\./);
       assert.match(html, new RegExp(`<option value="${editingProduct.productTypeId}" selected="">${editingProduct.productType}</option>`));
       assert.doesNotMatch(html, /Qunol Ultra CoQ10 100mg 120ct - (IFC|BULK|LABEL)/);
     }
