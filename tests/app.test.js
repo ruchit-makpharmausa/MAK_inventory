@@ -5,14 +5,14 @@ import { createApp } from '../server/app.js';
 const product = { id: 17, productTypeId: 1, productType: 'Label', name: 'Label', itemCode: 'LB-001', makItemCode: 'MAK-001', unit: 'Pcs', comment: 'Saved comment', totalReceived: 10, totalUsed: 0, availableBalance: 10 };
 const values = { productTypeId: 1, name: ' Label ', itemCode: ' LB-001 ', makItemCode: ' MAK-001 ', unit: 'Pcs', comment: ' Saved comment ' };
 
-function mockDatabase(responses = []) {
+function mockDatabase(responses = [], isAdmin = false) {
   const calls = [];
   const token = {};
   return {
     calls, token,
     async query(statement, parameters = {}, executor) {
       if (statement.includes('FROM dbo.user_sessions s JOIN dbo.app_users u')) {
-        return { recordset: [{ id: 1, username: 'test.user', displayName: 'Test User' }] };
+        return { recordset: [{ id: 1, username: 'test.user', displayName: 'Test User', isAdmin }] };
       }
       calls.push({ statement, parameters, executor });
       assert.ok(responses.length > 0, `Unexpected query: ${statement}`);
@@ -40,6 +40,47 @@ async function withApi(db, run) {
   try { await run(request); }
   finally { await new Promise((resolve) => server.close(resolve)); }
 }
+
+test('new receiving transactions record the authenticated user without returning attribution', async () => {
+  const db = mockDatabase([[{ id: 17 }], [{ id: 99 }]]);
+  await withApi(db, async (request) => {
+    const result = await request('/api/transactions/receiving', {
+      productId: 17, receivingDate: '2026-10-17', quantity: 5, materialLotNumber: 'LOT-A', makReleaseNumber: 'RN-1',
+    });
+    assert.equal(result.status, 201);
+    assert.equal(result.body.id, 99);
+    assert.equal(Object.hasOwn(result.body, 'addedByUserId'), false);
+    assert.equal(db.calls[1].parameters.addedByUserId[1], 1);
+    assert.match(db.calls[1].statement, /added_by_user_id/);
+  });
+});
+
+test('only administrators can edit transactions and usage edits retain existing attribution', async () => {
+  const unauthorized = mockDatabase();
+  await withApi(unauthorized, async (request) => {
+    const result = await request('/api/transactions/usage/44', {
+      productId: 17, usageDate: '2026-10-17', quantity: 4, makLotNumber: 'M-1', materialLotNumber: 'LOT-A',
+    }, 'PUT');
+    assert.equal(result.status, 403);
+    assert.equal(unauthorized.calls.length, 0);
+  });
+
+  const admin = mockDatabase([
+    [{ id: 17 }], [{ quantity: 3, materialLotNumber: 'LOT-A' }], [product],
+    [{ materialLotNumber: 'LOT-A', availableQuantity: 2 }], [],
+  ], true);
+  await withApi(admin, async (request) => {
+    const result = await request('/api/transactions/usage/44', {
+      productId: 17, usageDate: '2026-10-17', quantity: 4, makLotNumber: 'M-1', materialLotNumber: 'LOT-A',
+    }, 'PUT');
+    assert.equal(result.status, 200);
+    assert.deepEqual(result.body, { id: 44 });
+    const update = admin.calls.at(-1);
+    assert.match(update.statement, /UPDATE dbo\.usage_transactions/);
+    assert.doesNotMatch(update.statement, /added_by_user_id/);
+    assert.equal(update.parameters.quantity[1], 4);
+  });
+});
 
 test('product save and edit preserve both item codes and comments', async () => {
   const db = mockDatabase([[{ id: 17 }], [product], [{ matched: 1 }], [product]]);

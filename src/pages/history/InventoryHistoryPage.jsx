@@ -9,7 +9,7 @@ import { exportProductHistoryWorkbook } from '../../lib/product-history-workbook
 import { exportProductHistoryPdf } from '../../lib/product-history-pdf.js';
 import api from '../../lib/api.js';
 
-export default function InventoryHistoryPage({ products, types = [], onSaved }) {
+export default function InventoryHistoryPage({ products, types = [], onSaved, user }) {
   const [params, setParams] = useSearchParams();
   const typeFilter = params.get('typeId') || '';
   const requestedProductId = params.get('productId') || '';
@@ -46,9 +46,9 @@ export default function InventoryHistoryPage({ products, types = [], onSaved }) 
     return () => { active = false; };
   }, [selectedProductId, refreshKey]);
 
-  const onTransactionSaved = async (kind) => {
+  const onTransactionSaved = async (kind, edited = false) => {
     setTransaction(null);
-    setSuccess(`${kind === 'receiving' ? 'Receiving' : 'Usage'} transaction saved.`);
+    setSuccess(`${kind === 'receiving' ? 'Receiving' : 'Usage'} transaction ${edited ? 'updated' : 'saved'}.`);
     setRefreshWarning('');
     setHistory(null);
     setLoading(true);
@@ -124,9 +124,9 @@ export default function InventoryHistoryPage({ products, types = [], onSaved }) 
     {refreshWarning && <div className="notice error" role="alert">{refreshWarning}</div>}
     {error && <div className="notice error" role="alert">{error}</div>}
     {transaction && transaction.productId === selectedProductId && selectedProduct && <TransactionDialog
-      key={`${transaction.kind}-${selectedProductId}`} kind={transaction.kind}
+      key={`${transaction.kind}-${selectedProductId}-${transaction.row?.id || 'new'}`} kind={transaction.kind}
       product={history?.product && String(history.product.id) === selectedProductId ? history.product : selectedProduct}
-      onClose={() => setTransaction(null)} onSaved={onTransactionSaved} />}
+      transaction={transaction.row} onClose={() => setTransaction(null)} onSaved={onTransactionSaved} />}
     {loading ? <div className="panel empty-state" role="status">Loading inventory history…</div>
       : !history ? <div className="panel empty-state"><div className="empty-icon">◷</div>
       <strong>Select a product to view its history</strong><span>Receiving and usage records will appear here.</span></div>
@@ -135,9 +135,9 @@ export default function InventoryHistoryPage({ products, types = [], onSaved }) 
           {quantity(history.product.availableBalance)} <small>{history.product.unit}</small></strong></div>
           <span className="balance-product">{history.product.productType} · {history.product.itemCode} · {history.product.name}</span></div>
         <HistoryTable title="Receiving history" subtitle="Materials added to inventory"
-          rows={history.receiving} receiving />
+          rows={history.receiving} receiving isAdmin={user?.isAdmin} onEdit={(row) => setTransaction({ kind: 'receiving', productId: selectedProductId, row })} />
         <HistoryTable title="Usage history" subtitle="Materials used in production"
-          rows={history.usage} />
+          rows={history.usage} isAdmin={user?.isAdmin} onEdit={(row) => setTransaction({ kind: 'usage', productId: selectedProductId, row })} />
       </>}
   </>;
 }

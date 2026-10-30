@@ -13,17 +13,29 @@ const products = [
 ];
 let vite;
 let InventoryHistoryPage;
+let HistoryTable;
 let ReceivingPage;
 let UsagePage;
 before(async () => {
   vite = await createServer({ optimizeDeps: { noDiscovery: true, include: [] }, server: { middlewareMode: true, hmr: { server: createHttpServer() }, watch: null }, appType: 'custom' });
   ({ default: InventoryHistoryPage } = await vite.ssrLoadModule('/src/pages/history/InventoryHistoryPage.jsx'));
+  ({ default: HistoryTable } = await vite.ssrLoadModule('/src/components/HistoryTable.jsx'));
   ({ default: ReceivingPage } = await vite.ssrLoadModule('/src/pages/receiving/ReceivingPage.jsx'));
   ({ default: UsagePage } = await vite.ssrLoadModule('/src/pages/usage/UsagePage.jsx'));
 });
 after(async () => { await vite?.close(); });
 const render = (Page, url, catalog = products) => renderToStaticMarkup(createElement(StaticRouter, { location: url },
   createElement(Page, { products: catalog, types, onSaved: async () => {} })));
+
+test('transaction history exposes edit actions only to administrators without rendering creator attribution', () => {
+  const rows = [{ id: 7, date: '2026-10-17', makReleaseNumber: 'RN-1', quantity: 4, remarks: 'Received', addedByUserId: 1 }];
+  const renderTable = (isAdmin) => renderToStaticMarkup(createElement(HistoryTable, {
+    title: 'Receiving history', subtitle: 'Materials added to inventory', rows, receiving: true, isAdmin, onEdit: () => {},
+  }));
+  assert.doesNotMatch(renderTable(false), />Edit<|>Actions</);
+  assert.match(renderTable(true), />Edit<|>Actions/);
+  assert.doesNotMatch(renderTable(true), /addedByUserId|Creator/);
+});
 
 test('History offers in-page receiving and usage buttons rather than navigation links', () => {
   for (const product of products) {

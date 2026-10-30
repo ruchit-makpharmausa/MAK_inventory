@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import api from '../lib/api.js';
 import { quantity } from '../lib/format.js';
 
-export default function UsageMaterialLotSelect({ productId, unit }) {
+export default function UsageMaterialLotSelect({ productId, unit, selectedValue = '' }) {
   const [lots, setLots] = useState([]);
   const [loading, setLoading] = useState(Boolean(productId));
   const [error, setError] = useState('');
@@ -24,8 +24,10 @@ export default function UsageMaterialLotSelect({ productId, unit }) {
 
   return <div>
     <label>Material lot number <span className="muted-label">(optional)</span>
-      <select name="materialLotNumber" defaultValue="" disabled={!productId} aria-describedby="material-lot-help">
+      <select name="materialLotNumber" defaultValue={selectedValue} disabled={!productId} aria-describedby="material-lot-help">
         <option value="">N/A</option>
+        {selectedValue && !lots.some((lot) => lot.materialLotNumber === selectedValue)
+          && <option value={selectedValue}>{selectedValue} (current transaction)</option>}
         {lots.map((lot) => <option key={lot.materialLotNumber} value={lot.materialLotNumber}>
           {lot.materialLotNumber} ({quantity(lot.availableQuantity)}{unit ? ` ${unit}` : ''} available)
         </option>)}

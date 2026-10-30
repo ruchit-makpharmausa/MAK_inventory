@@ -248,8 +248,8 @@ The app checks for these existing tables in schema `dbo`:
 
 - `product_types`: `id`, `name`, `created_at`
 - `products`: `id`, `product_type_id`, `name`, `item_code`, `mak_item_code`, `unit`, `comment`, `created_at`, `updated_at`
-- `receiving_transactions`: `id`, `product_id`, `receiving_date`, `quantity`, `material_lot_number`, `mak_release_number`, `remarks`, `created_at`
-- `usage_transactions`: `id`, `product_id`, `usage_date`, `quantity`, `material_lot_number`, `mak_lot_number`, `remarks`, `created_at`
+- `receiving_transactions`: `id`, `product_id`, `receiving_date`, `quantity`, `material_lot_number`, `mak_release_number`, `remarks`, `added_by_user_id`, `created_at`
+- `usage_transactions`: `id`, `product_id`, `usage_date`, `quantity`, `material_lot_number`, `mak_lot_number`, `remarks`, `added_by_user_id`, `created_at`
 
 IDs are expected to be integer identity columns. Unique constraints must enforce unique `(product_type_id, item_code)` pairs and unique product type names; item codes are not globally unique. The login needs SELECT, INSERT, and UPDATE permissions on these inventory tables, plus visibility of their column metadata. The app does not need permission to create database objects.
 
@@ -276,6 +276,10 @@ This supersedes [scripts/usage-material-lot-required.sql](./scripts/usage-materi
 For installations already using the separate receiving reference, only [scripts/mak-release-number.sql](./scripts/mak-release-number.sql) is needed. With the app stopped and a verified current backup available, run it against the existing inventory database. It renames `dbo.receiving_transactions.mak_rn_number` to `mak_release_number` using `sp_rename`. It does not rewrite stored identifiers, including existing `RN` prefixes, or change NULLs, material lots, quantities, IDs, or balances. The guarded transaction can be rerun after success; it stops if both/neither reference columns exist or SQL-object dependencies require review. No new columns are added by the rename itself.
 
 Deploy the updated frontend and backend together after the migration, then restart and run `npm run check:db`. Receiving now sends/returns `makReleaseNumber` for **MAK Release Number** and `materialLotNumber` for actual material lots. Cached receiving forms posting the old `makRnNumber` property are accepted as a compatibility input only when the new property is absent, so their reference is not silently lost. Responses use the new property; refresh the browser to update labels and exports. The server requires the renamed column and performs no automatic migrations.
+
+### Transaction edits and creator attribution
+
+Administrators can edit receiving and usage records from the **Inventory History** tables. The server enforces the administrator role and checks that edits do not overdraw overall or material-lot inventory. Back up the database, ensure `dbo.app_users` exists, and run [scripts/transaction-admin-edit.sql](./scripts/transaction-admin-edit.sql) as a database administrator before deploying this version. New transactions store the creator's user ID in `added_by_user_id`; existing records remain NULL because their creators are unknown. Creator attribution is database-only and is not returned by API responses or displayed in the frontend.
 
 ## Inventory behavior
 

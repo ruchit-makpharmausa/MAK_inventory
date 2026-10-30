@@ -3,7 +3,7 @@ import TransactionFields from './TransactionFields.jsx';
 import api from '../lib/api.js';
 import { quantity } from '../lib/format.js';
 
-export default function TransactionDialog({ kind, product, onClose, onSaved }) {
+export default function TransactionDialog({ kind, product, transaction, onClose, onSaved }) {
   const receiving = kind === 'receiving';
   const dialogRef = useRef(null);
   const submitting = useRef(false);
@@ -31,7 +31,9 @@ export default function TransactionDialog({ kind, product, onClose, onSaved }) {
     setSaving(true);
     setError('');
     try {
-      await api(`/api/transactions/${kind}`, { method: 'POST', body: JSON.stringify(body) });
+      await api(transaction ? `/api/transactions/${kind}/${transaction.id}` : `/api/transactions/${kind}`, {
+        method: transaction ? 'PUT' : 'POST', body: JSON.stringify(body),
+      });
     } catch (requestError) {
       setError(requestError.message);
       submitting.current = false;
@@ -39,7 +41,7 @@ export default function TransactionDialog({ kind, product, onClose, onSaved }) {
       return;
     }
     // The parent closes the saved form before refreshing so refresh errors cannot cause duplicate entries.
-    onSaved(kind);
+    onSaved(kind, Boolean(transaction));
   };
 
   return <dialog ref={dialogRef} className="modal transaction-dialog" aria-labelledby="transaction-dialog-title"
@@ -50,7 +52,7 @@ export default function TransactionDialog({ kind, product, onClose, onSaved }) {
       if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) close();
     }}>
     <div className="modal-heading"><div><div className="eyebrow">{receiving ? 'INVENTORY IN' : 'INVENTORY OUT'}</div>
-      <h2 id="transaction-dialog-title">{receiving ? 'Receive inventory' : 'Record usage'}</h2></div>
+      <h2 id="transaction-dialog-title">{transaction ? 'Edit transaction' : receiving ? 'Receive inventory' : 'Record usage'}</h2></div>
       <button type="button" className="icon-button" onClick={close} disabled={saving} aria-label="Close dialog">×</button></div>
     <div id="transaction-dialog-product" className="transaction-dialog-product">
       <strong>{product.name}</strong>
@@ -61,11 +63,11 @@ export default function TransactionDialog({ kind, product, onClose, onSaved }) {
     {error && <div className="form-error" role="alert">{error}</div>}
     <form onSubmit={submit}>
       <fieldset disabled={saving}>
-        <TransactionFields kind={kind} productId={String(product.id)} unit={product.unit} />
+        <TransactionFields kind={kind} productId={String(product.id)} unit={product.unit} values={transaction || {}} />
       </fieldset>
       <div className="modal-actions">
         <button type="button" className="button secondary" onClick={close} disabled={saving}>Cancel</button>
-        <button className="button primary" disabled={saving}>{saving ? 'Saving…' : receiving ? 'Save receiving' : 'Save usage'}</button>
+        <button className="button primary" disabled={saving}>{saving ? 'Saving…' : transaction ? 'Save changes' : receiving ? 'Save receiving' : 'Save usage'}</button>
       </div>
     </form>
   </dialog>;

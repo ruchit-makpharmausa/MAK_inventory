@@ -232,10 +232,10 @@ export function createApp(db = database, {
     const result = await db.transaction(async (executor) => {
       if (!await lockProduct(body.productId, executor)) return { status: 404, error: 'Product not found.' };
       const inserted = await db.query(`
-        INSERT INTO dbo.receiving_transactions (product_id, receiving_date, quantity, material_lot_number, mak_release_number, remarks, created_at)
-        VALUES (@productId, @date, @quantity, @materialLotNumber, @makReleaseNumber, @remarks, SYSUTCDATETIME());
+        INSERT INTO dbo.receiving_transactions (product_id, receiving_date, quantity, material_lot_number, mak_release_number, remarks, added_by_user_id, created_at)
+        VALUES (@productId, @date, @quantity, @materialLotNumber, @makReleaseNumber, @remarks, @addedByUserId, SYSUTCDATETIME());
         SELECT CAST(SCOPE_IDENTITY() AS int) AS id;
-      `, transactionInputs(body, 'receiving'), executor);
+      `, { ...transactionInputs(body, 'receiving'), addedByUserId: [sql.Int, req.user.id] }, executor);
       return { id: inserted.recordset[0].id };
     });
     if (result.error) return fail(res, result.status, result.error);
@@ -263,14 +263,88 @@ export function createApp(db = database, {
         }
       }
       const inserted = await db.query(`
-        INSERT INTO dbo.usage_transactions (product_id, usage_date, quantity, material_lot_number, mak_lot_number, remarks, created_at)
-        VALUES (@productId, @date, @quantity, @materialLotNumber, @makLotNumber, @remarks, SYSUTCDATETIME());
+        INSERT INTO dbo.usage_transactions (product_id, usage_date, quantity, material_lot_number, mak_lot_number, remarks, added_by_user_id, created_at)
+        VALUES (@productId, @date, @quantity, @materialLotNumber, @makLotNumber, @remarks, @addedByUserId, SYSUTCDATETIME());
         SELECT CAST(SCOPE_IDENTITY() AS int) AS id;
-      `, inputs, executor);
+      `, { ...inputs, addedByUserId: [sql.Int, req.user.id] }, executor);
       return { status: 201, id: inserted.recordset[0].id, product: await getProduct(req.body.productId, executor) };
     });
     if (result.error) return fail(res, result.status, result.error);
     res.status(201).json(result);
+  }));
+  app.put('/api/transactions/:kind/:id', route(async (req, res) => {
+    if (!req.user?.isAdmin) return fail(res, 403, 'Administrator access is required to edit transactions.');
+    const { kind } = req.params;
+    if (!['receiving', 'usage'].includes(kind)) return fail(res, 404, 'Transaction type not found.');
+    if (!validId(req.params.id)) return fail(res, 404, 'Transaction not found.');
+    const body = req.body || {};
+    const errorMessage = transactionError(body, kind);
+    if (errorMessage) return fail(res, 400, errorMessage);
+
+    const table = kind === 'receiving' ? 'receiving_transactions' : 'usage_transactions';
+    const dateColumn = kind === 'receiving' ? 'receiving_date' : 'usage_date';
+    const result = await db.transaction(async (executor) => {
+      if (!await lockProduct(body.productId, executor)) return { status: 404, error: 'Product not found.' };
+      const existingResult = await db.query(`
+        SELECT quantity, material_lot_number AS materialLotNumber
+        FROM dbo.${table} WITH (UPDLOCK, HOLDLOCK) WHERE id = @id AND product_id = @productId
+      `, { id: [sql.Int, Number(req.params.id)], productId: [sql.Int, Number(body.productId)] }, executor);
+      const existing = existingResult.recordset[0];
+      if (!existing) return { status: 404, error: 'Transaction not found.' };
+      const product = await getProduct(body.productId, executor);
+      if (kind === 'usage') {
+        const availableBalance = Number(product.availableBalance) + Number(existing.quantity);
+        if (body.quantity > availableBalance) {
+          return { status: 400, error: `Insufficient inventory. Available: ${availableBalance} ${product.unit}.` };
+        }
+        const materialLotNumber = body.materialLotNumber?.trim() || null;
+        if (materialLotNumber !== null) {
+          const lots = await getMaterialLots(body.productId, executor);
+          const lot = lots.find((row) => row.materialLotNumber === materialLotNumber);
+          const lotBalance = Number(lot?.availableQuantity || 0)
+            + (existing.materialLotNumber?.trim() === materialLotNumber ? Number(existing.quantity) : 0);
+          if (body.quantity > lotBalance) {
+            return { status: 400, error: `Insufficient material lot inventory for ${materialLotNumber}.` };
+          }
+        }
+      } else {
+        if (Number(product.availableBalance) - Number(existing.quantity) + body.quantity < 0) {
+          return { status: 400, error: 'This edit would make available inventory negative.' };
+        }
+        const oldLot = existing.materialLotNumber?.trim() || null;
+        const newLot = body.materialLotNumber?.trim() || null;
+        for (const lotNumber of new Set([oldLot, newLot].filter(Boolean))) {
+          const lotResult = await db.query(`
+            SELECT
+              COALESCE((SELECT SUM(quantity) FROM dbo.receiving_transactions
+                WHERE product_id = @productId AND TRIM(@lotWhitespace FROM material_lot_number) COLLATE Latin1_General_100_BIN2 = @lot COLLATE Latin1_General_100_BIN2), 0) AS received,
+              COALESCE((SELECT SUM(quantity) FROM dbo.usage_transactions
+                WHERE product_id = @productId AND TRIM(@lotWhitespace FROM material_lot_number) COLLATE Latin1_General_100_BIN2 = @lot COLLATE Latin1_General_100_BIN2), 0) AS used
+          `, {
+            productId: [sql.Int, Number(body.productId)], lot: [sql.NVarChar(255), lotNumber],
+            lotWhitespace: [sql.NVarChar(25), lotWhitespace],
+          }, executor);
+          const lot = lotResult.recordset[0];
+          const proposedReceived = Number(lot.received)
+            - (oldLot === lotNumber ? Number(existing.quantity) : 0)
+            + (newLot === lotNumber ? body.quantity : 0);
+          if (proposedReceived < Number(lot.used)) {
+            return { status: 400, error: `This edit would leave insufficient stock in material lot ${lotNumber}.` };
+          }
+        }
+      }
+      const inputs = transactionInputs(body, kind);
+      await db.query(`
+        UPDATE dbo.${table} SET ${dateColumn} = @date, quantity = @quantity,
+          material_lot_number = @materialLotNumber,
+          ${kind === 'usage' ? 'mak_lot_number = @makLotNumber' : 'mak_release_number = @makReleaseNumber'},
+          remarks = @remarks
+        WHERE id = @id AND product_id = @productId
+      `, { ...inputs, id: [sql.Int, Number(req.params.id)] }, executor);
+      return { id: Number(req.params.id) };
+    });
+    if (result.error) return fail(res, result.status, result.error);
+    res.json({ id: result.id });
   }));
   app.get('/api/products/:id/material-lots', route(async (req, res) => {
     if (!validId(req.params.id)) return fail(res, 404, 'Product not found.');
