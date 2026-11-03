@@ -9,7 +9,7 @@ const text = (value) => String(value ?? '');
 const trimmed = (value) => text(value).trim();
 
 function quantityFormat(value, unit = '', showZero = false) {
-  const number = Number.isInteger(value) ? '#,##0' : '#,##0.0##';
+  const number = Number.isInteger(Number(value)) ? '#,##0' : '#,##0.###';
   const suffix = unit ? `" ${unit.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/["\\]/g, '\\$&')}"` : '';
   return `${number}${suffix};-${number}${suffix};${showZero ? `0${suffix}` : ''};@`;
 }

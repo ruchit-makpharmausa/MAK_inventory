@@ -5,7 +5,7 @@ const columns = [
   { header: 'Product Name', key: 'name', width: 44 },
   { header: 'Item Code', key: 'itemCode', width: 20 },
   { header: 'MAK Item Code', key: 'makItemCode', width: 22 },
-  { header: 'Lot Numbers', key: 'lotNumber', width: 24 },
+  { header: 'Customer LOT', key: 'lotNumber', width: 24 },
   { header: 'Total Received', key: 'totalReceived', width: 19 },
   { header: 'Total Used', key: 'totalUsed', width: 19 },
   { header: 'Balance', key: 'balance', width: 19 },
@@ -89,36 +89,22 @@ export async function createInventoryWorkbook(products, types = [], transactions
     });
     sheet.columns = columns.map((column) => ({ ...column }));
     const rows = productLots(group.products, rowsByType.receiving.get(group.transactionKey) || [], rowsByType.usage.get(group.transactionKey) || []);
-    let rowIndex = 2;
-    for (let offset = 0; offset < rows.length;) {
-      const product = rows[offset].product;
-      let end = offset + 1;
-      while (end < rows.length && rows[end].product === product) end++;
-      const firstRow = rowIndex;
-      for (const row of rows.slice(offset, end)) {
-        const excelRow = sheet.addRow({
-          name: String(product.name ?? ''), itemCode: String(product.itemCode ?? ''),
-          makItemCode: String(product.makItemCode ?? ''), lotNumber: row.lotNumber,
-          totalReceived: row.totalReceived, totalUsed: row.totalUsed, balance: row.balance,
-        });
-        excelRow.font = { name: 'Calibri', size: 12 };
-        excelRow.height = 23;
-        excelRow.getCell(4).alignment = { vertical: 'middle', wrapText: true };
-        for (const column of [5, 6, 7]) {
-          excelRow.getCell(column).numFmt = balanceNumberFormat;
-          excelRow.getCell(column).alignment = { horizontal: 'right', vertical: 'middle' };
-        }
-        for (const column of [2, 3]) excelRow.getCell(column).font = { name: 'Calibri', size: 12, color: { argb: 'FF000000' } };
+    for (const row of rows) {
+      const product = row.product;
+      const excelRow = sheet.addRow({
+        name: String(product.name ?? ''), itemCode: String(product.itemCode ?? ''),
+        makItemCode: String(product.makItemCode ?? ''), lotNumber: row.lotNumber,
+        totalReceived: row.totalReceived, totalUsed: row.totalUsed, balance: row.balance,
+      });
+      excelRow.font = { name: 'Calibri', size: 12 };
+      excelRow.height = 23;
+      excelRow.getCell(1).alignment = { vertical: 'middle', wrapText: true };
+      excelRow.getCell(4).alignment = { vertical: 'middle', wrapText: true };
+      for (const column of [5, 6, 7]) {
+        excelRow.getCell(column).numFmt = balanceNumberFormat;
+        excelRow.getCell(column).alignment = { horizontal: 'right', vertical: 'middle' };
       }
-      if (end - offset > 1) {
-        for (const column of [1, 2, 3]) sheet.mergeCells(firstRow, column, firstRow + end - offset - 1, column);
-      }
-      for (const column of [1, 2, 3]) sheet.getCell(firstRow, column).alignment = { vertical: 'middle', wrapText: column === 1 };
-      if (product.itemCode) sheet.getCell(firstRow, 2).note = `Item Code: ${product.itemCode}`;
-      const productNotes = [product.makItemCode ? `MAK Item Code: ${product.makItemCode}` : '', product.unit ? `Unit: ${product.unit}` : ''].filter(Boolean);
-      if (productNotes.length) sheet.getCell(firstRow, 3).note = productNotes.join('\n');
-      rowIndex += end - offset;
-      offset = end;
+      for (const column of [2, 3]) excelRow.getCell(column).font = { name: 'Calibri', size: 12, color: { argb: 'FF000000' } };
     }
     sheet.getRow(1).height = 34;
     sheet.getRow(1).eachCell((cell, column) => {

@@ -4,7 +4,7 @@ import ExcelJS from 'exceljs';
 import { createInventoryWorkbook, exportInventoryWorkbook } from '../src/lib/inventory-workbook.js';
 
 const types = [{ id: 1, name: 'Bulk' }, { id: 2, name: 'IFC' }, { id: 3, name: 'Label' }];
-const headers = ['Product Name', 'Item Code', 'MAK Item Code', 'Lot Numbers', 'Total Received', 'Total Used', 'Balance'];
+const headers = ['Product Name', 'Item Code', 'MAK Item Code', 'Customer LOT', 'Total Received', 'Total Used', 'Balance'];
 const product = (values = {}) => ({ id: 17, productTypeId: 1, productType: 'Bulk', name: 'Sample product',
   itemCode: '000123', makItemCode: 'TRV2583', unit: 'kgs', totalReceived: 0, totalUsed: 0, availableBalance: 0, ...values });
 const roundTrip = async (products, catalogTypes = types, transactions = {}) => {
@@ -14,7 +14,7 @@ const roundTrip = async (products, catalogTypes = types, transactions = {}) => {
   return result;
 };
 
-test('All-types dashboard export creates lot-wise rows and merges product identity across its lots', async () => {
+test('All-types dashboard export repeats product identity for each lot row without merged cells', async () => {
   const workbook = await roundTrip([
     product({ totalReceived: 36, totalUsed: 9, availableBalance: 27 }),
     product({ id: 18, name: 'Second Bulk product', itemCode: '000124', makItemCode: 'TRV2584', totalReceived: 10, totalUsed: 0, availableBalance: 10 }),
@@ -49,12 +49,23 @@ test('All-types dashboard export creates lot-wise rows and merges product identi
   assert.deepEqual([2, 3, 4, 5, 6, 7, 8].map((row) => [sheet.getCell(`E${row}`).value, sheet.getCell(`F${row}`).value, sheet.getCell(`G${row}`).value]),
     [[5, 0, 5], [35, 8, 27], [10, 1, 9], [1, 0, 1], [2, 4, -2], [0, 3, -3], [10, 0, 10]]);
   assert.deepEqual([sheet.getCell('A2').value, sheet.getCell('B2').value, sheet.getCell('C2').value], ['Sample product', '000123', 'TRV2583']);
-  for (const address of ['A3', 'A4', 'A5', 'A6', 'B3', 'C3', 'B6']) assert.equal(sheet.getCell(address).isMerged, true);
-  assert.deepEqual(Object.values(sheet._merges).map((merge) => merge.range).sort(), ['A2:A6', 'A7:A8', 'B2:B6', 'B7:B8', 'C2:C6', 'C7:C8']);
+  assert.deepEqual(Object.values(sheet._merges), []);
+  for (let row = 2; row <= 6; row++) {
+    assert.equal(sheet.getCell(`A${row}`).value, 'Sample product');
+    assert.equal(sheet.getCell(`B${row}`).value, '000123');
+    assert.equal(sheet.getCell(`C${row}`).value, 'TRV2583');
+  }
+  assert.deepEqual([sheet.getCell('A7').value, sheet.getCell('B7').value, sheet.getCell('C7').value], ['Second Bulk product', '000124', 'TRV2584']);
   assert.equal(sheet.getCell('G2').numFmt, '#,##0.###');
   assert.equal(sheet.getCell('E3').type, ExcelJS.ValueType.Number);
-  assert.equal(sheet.getCell('B2').note, 'Item Code: 000123');
-  assert.match(sheet.getCell('C2').note, /Unit: kgs/);
+  for (let row = 2; row <= sheet.rowCount; row++) {
+    for (const column of ['B', 'C']) {
+      const cell = sheet.getCell(`${column}${row}`);
+      assert.equal(cell.note, undefined);
+      assert.notEqual(cell.font.color?.argb, 'FFFF0000');
+      assert.notEqual(cell.fill.fgColor?.argb, 'FFFFC7CE');
+    }
+  }
   assert.equal(sheet.getCell('D2').alignment.wrapText, true);
   assert.equal(sheet.autoFilter, 'A1:G8');
   assert.deepEqual([workbook.getWorksheet('IFC').getCell('D2').value, workbook.getWorksheet('IFC').getCell('E2').value], ['Orphan', 100]);
@@ -75,7 +86,7 @@ test('empty catalog exports registered header-only type sheets; an empty registr
   assert.deepEqual(noTypes.worksheets[0].getRow(1).values.slice(1), headers);
 });
 
-test('new types, duplicate MAK codes, unsafe product codes and orphan usage lots retain individual rows', async () => {
+test('new types, duplicate Item Codes, unsafe product codes and orphan usage lots retain individual rows', async () => {
   const configured = [{ id: 1, name: 'Bulk' }, { id: 4, name: 'New type' }];
   const catalog = [product({ id: 17, makItemCode: 'TRV2583' }), product({ id: 18, makItemCode: 'TRV2583', name: 'Duplicate' }),
     product({ id: 19, makItemCode: 'A/B:*?[]\\', name: '=Literal' }), product({ id: 20, productTypeId: 4, productType: 'New type', makItemCode: '' })];
@@ -84,7 +95,7 @@ test('new types, duplicate MAK codes, unsafe product codes and orphan usage lots
   ] });
   assert.deepEqual(workbook.worksheets.map((sheet) => sheet.name), ['Bulk', 'New type']);
   const bulk = workbook.getWorksheet('Bulk');
-  assert.deepEqual(Object.values(bulk._merges).map((merge) => merge.range).sort(), ['A4:A5', 'B4:B5', 'C4:C5']);
+  assert.deepEqual(Object.values(bulk._merges), []);
   assert.equal(bulk.getCell('D4').value, 'LOT-01');
   assert.equal(bulk.getCell('E4').value, 4);
   assert.equal(bulk.getCell('D5').value, 'USED-ONLY');
@@ -95,7 +106,13 @@ test('new types, duplicate MAK codes, unsafe product codes and orphan usage lots
   assert.equal(bulk.getCell('A2').value, '=Literal');
   assert.equal(bulk.getCell('A3').value, 'Duplicate');
   assert.equal(bulk.getCell('A4').value, 'Sample product');
-  assert.equal(bulk.getCell('A5').isMerged, true);
+  assert.equal(bulk.getCell('A4').value, 'Sample product');
+  assert.equal(bulk.getCell('A5').value, 'Sample product');
+  for (const row of [2, 3, 4, 5]) {
+    assert.notEqual(bulk.getCell(`B${row}`).font.color?.argb, 'FFFF0000');
+    assert.notEqual(bulk.getCell(`B${row}`).fill.fgColor?.argb, 'FFFFC7CE');
+    assert.equal(bulk.getCell(`B${row}`).note, undefined);
+  }
   const newType = workbook.getWorksheet('New type');
   assert.equal(newType.getCell('D2').value, 'Unassigned (N/A)');
   assert.equal(newType.getCell('F2').value, 1);
