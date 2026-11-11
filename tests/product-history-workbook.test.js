@@ -40,7 +40,7 @@ test('selected-product export matches the six-column receipt/usage ledger format
   assert.equal(sheet.getCell('E2').value, null);
   assert.equal(sheet.getCell('C2').font.bold, true);
   assert.equal(sheet.getCell('D2').alignment.horizontal, 'right');
-  assert.equal(sheet.getCell('D2').numFmt, '#,##0.###');
+  assert.equal(sheet.getCell('D2').numFmt, '#,##0');
   assert.equal(sheet.getCell('A3').value.toISOString().slice(0, 10), '2026-10-13');
   assert.equal(sheet.getCell('C3').text, '');
   assert.equal(sheet.getCell('D3').value, null);

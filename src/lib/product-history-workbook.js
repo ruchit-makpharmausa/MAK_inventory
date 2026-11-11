@@ -11,7 +11,7 @@ export async function createProductHistoryWorkbook(history) {
   sheet.columns = widths.map((width, index) => ({ header: productHistoryHeaders[index], width }));
   sheet.getColumn(1).numFmt = 'm/d/yy';
   for (const column of [4, 5]) {
-    sheet.getColumn(column).numFmt = '#,##0.###';
+    sheet.getColumn(column).numFmt = '#,##0';
     sheet.getColumn(column).alignment = { horizontal: 'right', vertical: 'middle' };
   }
   const textColumns = [2, 3, 6];

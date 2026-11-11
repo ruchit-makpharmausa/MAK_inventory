@@ -14,7 +14,7 @@ const columns = [
 const productTypeName = (value) => String(value ?? '').trim() || 'Other';
 const normalizedLot = (value) => value == null || !String(value).trim() ? null : String(value).trim();
 const productId = (product, index) => product.id == null ? `missing:${index}` : String(product.id);
-const balanceNumberFormat = '#,##0.###';
+const balanceNumberFormat = '#,##0';
 
 function productLots(products, receivingRows, usageRows) {
   const quantities = new Map();

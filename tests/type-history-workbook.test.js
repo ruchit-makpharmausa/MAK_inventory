@@ -135,10 +135,10 @@ test('closing balances are numeric and green, include units, and never hide zero
       assert.equal(closing.getCell(column).fill.fgColor.argb, 'FFE2F0D9');
     }
   }
-  assert.match(workbook.worksheets[2].lastRow.getCell(5).numFmt, /^#,##0\.###/);
+  assert.match(workbook.worksheets[2].lastRow.getCell(5).numFmt, /^#,##0/);
 });
 
-test('optional zero quantities display blank, integer-like string quantities omit decimals, and fractions keep up to three places', async () => {
+test('Excel quantity cells use thousands separators and no decimal places', async () => {
   const workbook = await roundTrip(report([history({
     receiving: [receipt({ id: 1, quantity: '1234.0' }), receipt({ id: 2, quantity: 12.125 }), receipt({ id: 3, quantity: 0 }), receipt({ id: 4, quantity: null })],
     usage: [usage({ quantity: 0 })],
@@ -147,7 +147,7 @@ test('optional zero quantities display blank, integer-like string quantities omi
   assert.equal(sheet.getCell('E2').value, 1234);
   assert.equal(sheet.getCell('E2').numFmt, '#,##0;-#,##0;;@');
   assert.equal(sheet.getCell('E3').value, 12.125);
-  assert.equal(sheet.getCell('E3').numFmt, '#,##0.###;-#,##0.###;;@');
+  assert.equal(sheet.getCell('E3').numFmt, '#,##0;-#,##0;;@');
   assert.equal(sheet.getCell('E4').value, 0);
   assert.equal(sheet.getCell('E5').value, 0);
   assert.equal(sheet.getCell('F6').value, 0);

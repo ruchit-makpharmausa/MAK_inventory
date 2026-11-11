@@ -56,7 +56,7 @@ test('All-types dashboard export repeats product identity for each lot row witho
     assert.equal(sheet.getCell(`C${row}`).value, 'TRV2583');
   }
   assert.deepEqual([sheet.getCell('A7').value, sheet.getCell('B7').value, sheet.getCell('C7').value], ['Second Bulk product', '000124', 'TRV2584']);
-  assert.equal(sheet.getCell('G2').numFmt, '#,##0.###');
+  assert.equal(sheet.getCell('G2').numFmt, '#,##0');
   assert.equal(sheet.getCell('E3').type, ExcelJS.ValueType.Number);
   for (let row = 2; row <= sheet.rowCount; row++) {
     for (const column of ['B', 'C']) {
@@ -129,7 +129,7 @@ test('dashboard download exports lot-wise rows and preserves product codes as te
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { setTimeout: (callback) => callback() } });
   t.mock.method(URL, 'createObjectURL', (value) => { blob = value; return 'blob:lot-wise-report'; });
   try {
-    await exportInventoryWorkbook([product()], types, { receiving: [{ productId: 17, materialLotNumber: '000LOT', quantity: 100 }], usage: [] });
+    await exportInventoryWorkbook([product()], types, { receiving: [{ productId: 17, materialLotNumber: '000LOT', quantity: 123456789 }], usage: [] });
     assert.equal(clicked, true);
     assert.equal(link.download, 'mak-inventory-summary.xlsx');
     const workbook = new ExcelJS.Workbook();
@@ -138,7 +138,8 @@ test('dashboard download exports lot-wise rows and preserves product codes as te
     assert.equal(sheet.getCell('B2').type, ExcelJS.ValueType.String);
     assert.equal(sheet.getCell('B2').value, '000123');
     assert.equal(sheet.getCell('D2').value, '000LOT');
-    assert.equal(sheet.getCell('E2').value, 100);
+    assert.equal(sheet.getCell('E2').value, 123456789);
+    assert.equal(sheet.getCell('E2').numFmt, '#,##0');
   } finally {
     if (originalDocument) Object.defineProperty(globalThis, 'document', originalDocument);
     else delete globalThis.document;
