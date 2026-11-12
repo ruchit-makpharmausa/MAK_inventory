@@ -31,6 +31,7 @@ async function withApi(db, run) {
   app.use('/api', (req, res, next) => {
     if (req.get('x-test-user') !== 'regular') return res.status(401).json({ error: 'Please sign in to continue.' });
     req.user = { id: 1, isAdmin: false };
+    req.company = { id: 7, name: 'Quten', code: 'TRV' };
     next();
   });
   mountLotInventory(app, db);
@@ -126,20 +127,22 @@ test('summary uses one SQL union-all aggregate with binary normalized product/lo
   assert.equal(db.calls.length, 1);
   const call = db.calls[0];
   assertWhitespaceInput(call);
-  assert.deepEqual(Object.keys(call.parameters), ['lotWhitespace']);
+  assert.deepEqual(Object.keys(call.parameters), ['lotWhitespace', 'companyId']);
+  assert.equal(call.parameters.companyId[1], 7);
   const { statement } = call;
   assert.equal(statement.split(normalizedLot).length - 1, 2);
   assert.equal((statement.match(/UNION ALL/g) || []).length, 1);
-  assert.match(statement, /quantity AS received, CAST\(0 AS float\) AS used\s+FROM dbo\.receiving_transactions/);
-  assert.match(statement, /CAST\(0 AS float\) AS received, quantity AS used\s+FROM dbo\.usage_transactions/);
+  assert.match(statement, /t\.quantity AS received, CAST\(0 AS float\) AS used\s+FROM dbo\.receiving_transactions t JOIN dbo\.products rp/);
+  assert.match(statement, /CAST\(0 AS float\) AS received, t\.quantity AS used\s+FROM dbo\.usage_transactions t JOIN dbo\.products up/);
   assert.match(statement, /GROUP BY productId, materialLotNumber COLLATE Latin1_General_100_BIN2/);
   assert.match(statement, /SUM\(received\) AS totalReceived, SUM\(used\) AS totalUsed/);
   assert.match(statement, /b\.totalReceived - b\.totalUsed AS availableBalance/);
   assert.match(statement, /SUM\(b\.totalReceived - b\.totalUsed\) OVER \(PARTITION BY b\.productId\) AS productBalance/);
   assert.match(statement, /JOIN dbo\.products p ON p\.id = b\.productId/);
-  assert.match(statement, /JOIN dbo\.product_types pt ON pt\.id = p\.product_type_id/);
+  assert.match(statement, /JOIN dbo\.product_types pt ON pt\.id = p\.product_type_id AND pt\.company_id = p\.company_id/);
+  assert.match(statement, /WHERE p\.company_id = @companyId/);
   assert.match(statement, /ORDER BY p\.id, b\.materialLotNumber COLLATE Latin1_General_100_BIN2/);
-  assert.doesNotMatch(statement, /\b(?:WHERE|HAVING|DISTINCT)\b|[<>]|N\/A|COALESCE\([^)]*materialLotNumber/i);
+  assert.doesNotMatch(statement, /\b(?:HAVING|DISTINCT)\b|[<>]|N\/A|COALESCE\([^)]*materialLotNumber/i);
   assertReadOnly(db.calls);
 });
 

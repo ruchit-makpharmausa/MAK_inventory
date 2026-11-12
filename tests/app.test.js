@@ -12,7 +12,8 @@ function mockDatabase(responses = [], isAdmin = false) {
     calls, token,
     async query(statement, parameters = {}, executor) {
       if (statement.includes('FROM dbo.user_sessions s JOIN dbo.app_users u')) {
-        return { recordset: [{ id: 1, username: 'test.user', displayName: 'Test User', isAdmin }] };
+        return { recordset: [{ id: 1, username: 'test.user', displayName: 'Test User', isAdmin,
+          companyId: 7, companyName: 'Quten', companyCode: 'TRV' }] };
       }
       calls.push({ statement, parameters, executor });
       assert.ok(responses.length > 0, `Unexpected query: ${statement}`);
@@ -40,6 +41,29 @@ async function withApi(db, run) {
   try { await run(request); }
   finally { await new Promise((resolve) => server.close(resolve)); }
 }
+
+test('catalog and transaction reads use the authenticated session company', async () => {
+  const db = mockDatabase([[product], []]);
+  await withApi(db, async (request) => {
+    assert.equal((await request('/api/products')).status, 200);
+    assert.equal((await request('/api/transactions/receiving')).status, 200);
+  });
+  assert.equal(db.calls[0].parameters.companyId[1], 7);
+  assert.match(db.calls[0].statement, /WHERE p\.company_id = @companyId/);
+  assert.equal(db.calls[1].parameters.companyId[1], 7);
+  assert.match(db.calls[1].statement, /WHERE p\.company_id = @companyId/);
+});
+
+test('new products are assigned to the selected company, ignoring client-supplied company IDs', async () => {
+  const db = mockDatabase([[{ id: 17 }], [product]]);
+  await withApi(db, async (request) => {
+    const result = await request('/api/products', { ...values, companyId: 999 });
+    assert.equal(result.status, 201);
+    assert.equal(db.calls[0].parameters.companyId[1], 7);
+    assert.match(db.calls[0].statement, /INSERT INTO dbo\.products \(product_type_id, company_id,/);
+    assert.equal(db.calls[1].parameters.companyId[1], 7);
+  });
+});
 
 test('new receiving transactions record the authenticated user without returning attribution', async () => {
   const db = mockDatabase([[{ id: 17 }], [{ id: 99 }]]);

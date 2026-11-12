@@ -36,6 +36,21 @@ button { cursor: pointer; }
 .main-area { margin-left: 252px; min-height: 100vh; }
 .topbar { height: 65px; background: #fff; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; padding: 0 42px; }
 .topbar-account { display: flex; align-items: center; gap: 9px; }
+.account-name { color: #778598; font-size: 11px; }
+.company-picker-card { display: grid; gap: 12px; }
+.company-picker-card > .brand-mark { margin-bottom: 4px; background: var(--navy); color: #fff; }
+.company-picker-card > .eyebrow { color: #8292a6; }
+.company-picker-card > p { color: #8190a0; font-size: 13px; line-height: 1.6; }
+.company-options { display: grid; gap: 8px; }
+.company-option { display: flex; align-items: center; gap: 8px; }
+.company-option > .button { flex: 1; justify-content: space-between; min-height: 44px; }
+.company-option > .button span { color: var(--muted); font-size: 11px; }
+.company-create-form { display: grid; gap: 10px; border-top: 1px solid var(--line); margin-top: 10px; padding-top: 18px; }
+.company-create-form h2, .archived-companies h2 { font-size: 16px; color: var(--navy); }
+.company-create-form input { height: 42px; font-size: 13px; }
+.archived-companies { display: grid; gap: 8px; border-top: 1px solid var(--line); padding-top: 16px; margin-top: 8px; }
+.archived-companies .company-option { justify-content: space-between; color: var(--muted); font-size: 12px; }
+.company-signout { justify-self: center; margin-top: 4px; }
 .breadcrumb { color: #8793a2; font-size: 12px; }
 .breadcrumb span { padding: 0 10px; color: #c3cbd4; }
 .breadcrumb strong { color: #35475a; font-weight: 600; }
@@ -219,7 +234,9 @@ textarea { resize: vertical; min-height: 61px; }
   .mobile-brand span { font-weight: 500; color: #7c8a99; }
   .breadcrumb { display: none; }
   .company-chip { font-size: 10px; padding: 6px 8px; }
+  .account-name { display: none; }
   .topbar-account { gap: 6px; }
+  .topbar-account .button { padding: 6px 8px; font-size: 10px; }
   .signout-button { padding: 6px 8px; font-size: 10px; }
   .content { padding: 25px 14px 35px; }
   .page-heading { align-items: flex-start; }

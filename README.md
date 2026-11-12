@@ -88,6 +88,12 @@ The website uses port `567`. SQL Server continues to use port `1433` with certif
 
 The home page requires a username and password before opening the inventory dashboard. To create the login tables, select the existing inventory database in SQL Server Management Studio and run [scripts/login-tables.sql](./scripts/login-tables.sql). This separate SQL script creates only `dbo.app_users` and `dbo.user_sessions`; it does not create a database or change inventory data.
 
+### Company workspaces
+
+After sign-in, users choose an active company; **Change company** returns to the picker. Inventory APIs are scoped on the server to the selected company. All signed-in users can select every active company. Administrators can create companies and archive/restore them from the picker; archiving preserves inventory and prevents selection, it does not delete records. New companies start with no product types or inventory.
+
+Before deploying, stop the app, back up the database, and run [scripts/company-workspaces.sql](./scripts/company-workspaces.sql) as a database administrator. The migration creates the Quten company with code **TRV**, assigns all current product types and products to Quten (their existing transactions stay connected through their product), adds company ownership constraints, and adds the per-session company selection. No product names, codes, quantities, or transactions are rewritten. Then deploy and restart the app. `npm run check:db` verifies the new schema but does not apply migrations.
+
 For a new installation, create the first **administrator** account from PowerShell in the app folder. Run the commands one line at a time; the password must be at least 6 characters. Existing installations must complete the admin upgrade below before starting the updated app.
 
 ```powershell
@@ -246,12 +252,14 @@ For development, use the same paths on Vite's port, such as `http://localhost:51
 
 The app checks for these existing tables in schema `dbo`:
 
-- `product_types`: `id`, `name`, `created_at`
-- `products`: `id`, `product_type_id`, `name`, `item_code`, `mak_item_code`, `unit`, `comment`, `created_at`, `updated_at`
+- `companies`: `id`, `name`, `code`, `is_active`, `created_at`
+- `user_sessions`: `token_hash`, `user_id`, `current_company_id`, `expires_at`, `created_at`
+- `product_types`: `id`, `name`, `company_id`, `created_at`
+- `products`: `id`, `product_type_id`, `company_id`, `name`, `item_code`, `mak_item_code`, `unit`, `comment`, `created_at`, `updated_at`
 - `receiving_transactions`: `id`, `product_id`, `receiving_date`, `quantity`, `material_lot_number`, `mak_release_number`, `remarks`, `added_by_user_id`, `created_at`
 - `usage_transactions`: `id`, `product_id`, `usage_date`, `quantity`, `material_lot_number`, `mak_lot_number`, `remarks`, `added_by_user_id`, `created_at`
 
-IDs are expected to be integer identity columns. Nonblank MAK Item Codes must be unique within each product type, while Item Codes may be reused; product type names remain unique. The login needs SELECT, INSERT, and UPDATE permissions on these inventory tables, plus visibility of their column metadata. The app does not need permission to create database objects.
+IDs are expected to be integer identity columns. Nonblank MAK Item Codes must be unique within each company’s product type, while Item Codes may be reused; product type names are unique within each company. The login needs SELECT, INSERT, and UPDATE permissions on the company, product-type, and product tables; SELECT, INSERT, UPDATE, and DELETE on user sessions; and the existing inventory transaction permissions. It also needs visibility of the required column metadata. The app does not need permission to create database objects.
 
 A connection failure or missing column returns an explicit error; the app never switches to a local database. Previous SQLite files and backups remain untouched and are not used by the app.
 

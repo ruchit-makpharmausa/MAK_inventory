@@ -5,13 +5,15 @@ const lotWhitespace = '\u0009\u000a\u000b\u000c\u000d\u0020\u00a0\u1680\u2000\u2
 const normalizedLot = `NULLIF(TRIM(@lotWhitespace COLLATE Latin1_General_100_BIN2 FROM material_lot_number COLLATE Latin1_General_100_BIN2) COLLATE Latin1_General_100_BIN2, N'' COLLATE Latin1_General_100_BIN2)`;
 const inventorySelect = `
   WITH movements AS (
-    SELECT product_id AS productId, ${normalizedLot} AS materialLotNumber,
-           quantity AS received, CAST(0 AS float) AS used
-    FROM dbo.receiving_transactions
+    SELECT t.product_id AS productId, ${normalizedLot} AS materialLotNumber,
+           t.quantity AS received, CAST(0 AS float) AS used
+    FROM dbo.receiving_transactions t JOIN dbo.products rp ON rp.id = t.product_id
+    WHERE rp.company_id = @companyId
     UNION ALL
-    SELECT product_id AS productId, ${normalizedLot} AS materialLotNumber,
-           CAST(0 AS float) AS received, quantity AS used
-    FROM dbo.usage_transactions
+    SELECT t.product_id AS productId, ${normalizedLot} AS materialLotNumber,
+           CAST(0 AS float) AS received, t.quantity AS used
+    FROM dbo.usage_transactions t JOIN dbo.products up ON up.id = t.product_id
+    WHERE up.company_id = @companyId
   ), buckets AS (
     SELECT productId, materialLotNumber COLLATE Latin1_General_100_BIN2 AS materialLotNumber,
            SUM(received) AS totalReceived, SUM(used) AS totalUsed
@@ -24,17 +26,18 @@ const inventorySelect = `
          b.totalReceived, b.totalUsed, b.totalReceived - b.totalUsed AS availableBalance,
          SUM(b.totalReceived - b.totalUsed) OVER (PARTITION BY b.productId) AS productBalance
   FROM buckets b JOIN dbo.products p ON p.id = b.productId
-  JOIN dbo.product_types pt ON pt.id = p.product_type_id
+  JOIN dbo.product_types pt ON pt.id = p.product_type_id AND pt.company_id = p.company_id
+  WHERE p.company_id = @companyId
   ORDER BY p.id, b.materialLotNumber COLLATE Latin1_General_100_BIN2
 `;
 
 export function mountLotInventory(app, db) {
   const route = (handler) => (req, res, next) => Promise.resolve(handler(req, res)).catch(next);
   const fail = (res, status, message) => res.status(status).json({ error: message });
-  const whitespaceInput = () => ({ lotWhitespace: [sql.NVarChar(25), lotWhitespace] });
+  const queryInputs = (req) => ({ lotWhitespace: [sql.NVarChar(25), lotWhitespace], companyId: [sql.Int, req.company.id] });
 
-  app.get('/api/lot-inventory', route(async (_req, res) => {
-    res.json((await db.query(inventorySelect, whitespaceInput())).recordset);
+  app.get('/api/lot-inventory', route(async (req, res) => {
+    res.json((await db.query(inventorySelect, queryInputs(req))).recordset);
   }));
 
   app.get('/api/lot-inventory/:productId/history', route(async (req, res) => {
@@ -50,17 +53,17 @@ export function mountLotInventory(app, db) {
       return fail(res, 400, 'Specify one material lot (255 characters or fewer) or unassigned=1.');
     }
     const materialLotNumber = unassigned ? null : lot;
-    const productInput = { productId: [sql.Int, productId] };
+    const productInput = { productId: [sql.Int, productId], companyId: [sql.Int, req.company.id] };
     const productResult = await db.query(`
       SELECT p.id, p.name, p.item_code AS itemCode, p.mak_item_code AS makItemCode,
              p.product_type_id AS productTypeId, pt.name AS productType, p.unit
-      FROM dbo.products p JOIN dbo.product_types pt ON pt.id = p.product_type_id
-      WHERE p.id = @productId
+      FROM dbo.products p JOIN dbo.product_types pt ON pt.id = p.product_type_id AND pt.company_id = p.company_id
+      WHERE p.id = @productId AND p.company_id = @companyId
     `, productInput);
     const product = productResult.recordset[0];
     if (!product) return fail(res, 404, 'Product not found.');
 
-    const inputs = { ...productInput, ...whitespaceInput(),
+    const inputs = { ...productInput, lotWhitespace: [sql.NVarChar(25), lotWhitespace],
       ...(unassigned ? {} : { materialLotNumber: [sql.NVarChar(255), materialLotNumber] }) };
     const lotScope = unassigned ? `${normalizedLot} IS NULL`
       : `${normalizedLot} = @materialLotNumber COLLATE Latin1_General_100_BIN2`;

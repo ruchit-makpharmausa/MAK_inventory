@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-
 import AppLayout from './components/AppLayout.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 import ProductModal from './components/ProductModal.jsx';
+import CompanySelection from './components/CompanySelection.jsx';
 import DashboardPage from './pages/dashboard/DashboardPage.jsx';
 import LoginPage from './pages/login/LoginPage.jsx';
 import ProductsPage from './pages/products/ProductsPage.jsx';
@@ -61,6 +62,22 @@ function App() {
     }
   };
 
+  const switchCompany = async () => {
+    try {
+      const result = await api('/api/auth/company/clear', { method: 'POST' });
+      setUser(result.user);
+      setProducts([]);
+      setAllProducts([]);
+      setTypes([]);
+      setSearch('');
+      setTypeFilter('');
+      setEditingProduct(null);
+      setMessage(null);
+    } catch (error) {
+      setMessage({ kind: 'error', text: error.message });
+    }
+  };
+
   const signOut = async () => {
     try {
       await api('/api/auth/logout', { method: 'POST' });
@@ -95,12 +112,12 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user?.company) return;
     loadProducts().catch((error) => setMessage({ kind: 'error', text: error.message }));
   }, [loadProducts, user]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user?.company) return;
     loadBase().catch((error) => setMessage({ kind: 'error', text: error.message }));
   }, [loadBase, user]);
 
@@ -185,6 +202,7 @@ function App() {
   };
 
   if (authLoading) return <div className="auth-loading" role="status">Checking your sign-in…</div>;
+  if (user && !user.company) return <CompanySelection user={user} onSelected={setUser} />;
 
   return <>
     <Routes>
@@ -192,7 +210,7 @@ function App() {
         ? <Navigate to={loginDestination(location.state?.from, user.isAdmin)} replace />
         : <LoginPage error={authError} busy={authBusy} onSubmit={signIn} />} />
       <Route element={<ProtectedRoute user={user} />}>
-        <Route element={<AppLayout user={user} message={message} onSignOut={signOut}
+        <Route element={<AppLayout user={user} message={message} onSignOut={signOut} onSwitchCompany={switchCompany}
           onDismiss={() => setMessage(null)} />}>
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<DashboardPage

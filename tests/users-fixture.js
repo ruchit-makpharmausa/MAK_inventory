@@ -8,6 +8,7 @@ export async function usersDatabase() {
   ];
   const sessions = new Map();
   const calls = [];
+  const company = { id: 17, name: 'Quten', code: 'TRV' };
   const publicAccount = ({ passwordHash: _passwordHash, ...user }) => ({ ...user });
   return {
     users, calls,
@@ -15,15 +16,29 @@ export async function usersDatabase() {
     async query(statement, parameters = {}) {
       calls.push({ statement, parameters });
       if (statement.includes('FROM dbo.user_sessions s JOIN dbo.app_users u')) {
-        const user = users.find((entry) => entry.id === sessions.get(parameters.tokenHash[1]) && entry.isActive);
-        return { recordset: user ? [publicAccount(user)] : [] };
+        const session = sessions.get(parameters.tokenHash[1]);
+        const user = users.find((entry) => entry.id === session?.userId && entry.isActive);
+        return { recordset: user ? [{ ...publicAccount(user), ...(session.companyId ? {
+          companyId: company.id, companyName: company.name, companyCode: company.code,
+        } : {}) }] : [] };
+      }
+      if (statement.includes('FROM dbo.companies WHERE is_active = 1')) {
+        return { recordset: [{ ...company }] };
+      }
+      if (statement.includes('FROM dbo.companies WHERE id = @companyId AND is_active = 1')) {
+        return { recordset: [{ companyId: company.id, companyName: company.name, companyCode: company.code }] };
+      }
+      if (statement.includes('UPDATE dbo.user_sessions SET current_company_id = @companyId')) {
+        const session = sessions.get(parameters.tokenHash[1]);
+        if (session) session.companyId = company.id;
+        return { recordset: [] };
       }
       if (statement.includes('FROM dbo.app_users WHERE username = @username')) {
         return { recordset: users.filter((entry) => entry.username === parameters.username[1]) };
       }
       if (statement.includes('INSERT INTO dbo.user_sessions')) {
         sessions.delete(parameters.previousTokenHash[1]);
-        sessions.set(parameters.tokenHash[1], parameters.userId[1]);
+        sessions.set(parameters.tokenHash[1], { userId: parameters.userId[1], companyId: null });
         return { recordset: [] };
       }
       if (statement.includes('DELETE FROM dbo.user_sessions WHERE token_hash')) {

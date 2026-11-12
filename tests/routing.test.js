@@ -39,7 +39,8 @@ test('production deep links serve the SPA while API authorization and errors rem
   const previous = process.env.NODE_ENV;
   process.env.NODE_ENV = 'production';
   const app = createApp({
-    async query() { return { recordset: [{ id: 1, username: 'test.user', displayName: 'Test User', isAdmin: false }] }; },
+    async query() { return { recordset: [{ id: 1, username: 'test.user', displayName: 'Test User', isAdmin: false,
+      companyId: 7, companyName: 'Quten', companyCode: 'TRV' }] }; },
   }, { clientDirectory: directory });
   if (previous === undefined) delete process.env.NODE_ENV;
   else process.env.NODE_ENV = previous;

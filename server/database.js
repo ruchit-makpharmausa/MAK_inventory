@@ -6,8 +6,10 @@ import { fileURLToPath } from 'node:url';
 dotenv.config({ path: fileURLToPath(new URL('../.env', import.meta.url)), quiet: true });
 
 export const expectedColumns = {
-  product_types: ['id', 'name', 'created_at'],
-  products: ['id', 'product_type_id', 'name', 'item_code', 'mak_item_code', 'unit', 'comment', 'created_at', 'updated_at'],
+  companies: ['id', 'name', 'code', 'is_active', 'created_at'],
+  product_types: ['id', 'name', 'company_id', 'created_at'],
+  products: ['id', 'product_type_id', 'company_id', 'name', 'item_code', 'mak_item_code', 'unit', 'comment', 'created_at', 'updated_at'],
+  user_sessions: ['token_hash', 'user_id', 'current_company_id', 'expires_at', 'created_at'],
   receiving_transactions: ['id', 'product_id', 'receiving_date', 'quantity', 'material_lot_number', 'mak_release_number', 'remarks', 'added_by_user_id', 'created_at'],
   usage_transactions: ['id', 'product_id', 'usage_date', 'quantity', 'material_lot_number', 'mak_lot_number', 'remarks', 'added_by_user_id', 'created_at'],
 };
@@ -51,7 +53,7 @@ export async function verifyExistingSchema(pool) {
     JOIN sys.schemas s ON s.schema_id = t.schema_id
     JOIN sys.columns c ON c.object_id = t.object_id
     WHERE s.name = N'dbo'
-      AND t.name IN (N'product_types', N'products', N'receiving_transactions', N'usage_transactions')
+      AND t.name IN (N'companies', N'product_types', N'products', N'user_sessions', N'receiving_transactions', N'usage_transactions')
   `);
   const present = new Set(recordset.map((row) => `${row.tableName}.${row.columnName}`.toLowerCase()));
   const missing = Object.entries(expectedColumns).flatMap(([table, columns]) => columns

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import database, { connectionFailure } from './database.js';
 import { mountAuthentication } from './auth.js';
 import { mountUserAdministration } from './users.js';
+import { mountCompanyAdministration } from './companies.js';
 import { mountLotInventory } from './lot-inventory.js';
 
 const productSelect = `
@@ -14,7 +15,7 @@ const productSelect = `
          COALESCE(r.total_received, 0) AS totalReceived,
          COALESCE(u.total_used, 0) AS totalUsed,
          COALESCE(r.total_received, 0) - COALESCE(u.total_used, 0) AS availableBalance
-  FROM dbo.products p JOIN dbo.product_types pt ON pt.id = p.product_type_id
+  FROM dbo.products p JOIN dbo.product_types pt ON pt.id = p.product_type_id AND pt.company_id = p.company_id
   LEFT JOIN (SELECT product_id, SUM(quantity) AS total_received FROM dbo.receiving_transactions GROUP BY product_id) r ON r.product_id = p.id
   LEFT JOIN (SELECT product_id, SUM(quantity) AS total_used FROM dbo.usage_transactions GROUP BY product_id) u ON u.product_id = p.id
 `;
@@ -92,12 +93,17 @@ export function createApp(db = database, {
   app.use(express.json());
   const route = (handler) => (req, res, next) => Promise.resolve(handler(req, res)).catch(next);
   const fail = (res, status, message) => res.status(status).json({ error: message });
-  const getProduct = async (id, executor) => {
-    const result = await db.query(`${productSelect} WHERE p.id = @id`, { id: [sql.Int, Number(id)] }, executor);
+  const getProduct = async (id, companyId, executor) => {
+    const result = await db.query(`${productSelect} WHERE p.id = @id AND p.company_id = @companyId`, {
+      id: [sql.Int, Number(id)], companyId: [sql.Int, Number(companyId)],
+    }, executor);
     return result.recordset[0];
   };
-  const lockProduct = async (productId, executor) => {
-    const result = await db.query('SELECT id FROM dbo.products WITH (UPDLOCK, HOLDLOCK) WHERE id = @productId', { productId: [sql.Int, Number(productId)] }, executor);
+  const lockProduct = async (productId, companyId, executor) => {
+    const result = await db.query(`SELECT id FROM dbo.products WITH (UPDLOCK, HOLDLOCK)
+      WHERE id = @productId AND company_id = @companyId`, {
+      productId: [sql.Int, Number(productId)], companyId: [sql.Int, Number(companyId)],
+    }, executor);
     return result.recordset.length > 0;
   };
   const getMaterialLots = async (productId, executor) => {
@@ -114,19 +120,22 @@ export function createApp(db = database, {
   }));
   mountAuthentication(app, db);
   mountUserAdministration(app, db);
+  mountCompanyAdministration(app, db);
   mountLotInventory(app, db);
 
-  app.get('/api/product-types', route(async (_req, res) => {
-    res.json((await db.query('SELECT id, name FROM dbo.product_types ORDER BY name')).recordset);
+  app.get('/api/product-types', route(async (req, res) => {
+    res.json((await db.query('SELECT id, name FROM dbo.product_types WHERE company_id = @companyId ORDER BY name', {
+      companyId: [sql.Int, req.company.id],
+    })).recordset);
   }));
   app.post('/api/product-types', route(async (req, res) => {
     if (!requiredText(req.body.name)) return fail(res, 400, 'Product type name is required.');
     if (tooLong(req.body.name, 255)) return fail(res, 400, 'Product type name must be 255 characters or fewer.');
     try {
       const result = await db.query(`
-        INSERT INTO dbo.product_types (name, created_at) VALUES (@name, SYSUTCDATETIME());
+        INSERT INTO dbo.product_types (name, company_id, created_at) VALUES (@name, @companyId, SYSUTCDATETIME());
         SELECT id, name FROM dbo.product_types WHERE id = CAST(SCOPE_IDENTITY() AS int);
-      `, { name: [sql.NVarChar(255), req.body.name.trim()] });
+      `, { name: [sql.NVarChar(255), req.body.name.trim()], companyId: [sql.Int, req.company.id] });
       res.status(201).json(result.recordset[0]);
     } catch (error) {
       if (duplicate(error)) return fail(res, 409, 'That product type already exists.');
@@ -135,23 +144,23 @@ export function createApp(db = database, {
   }));
   app.get('/api/product-types/:id/history', route(async (req, res) => {
     if (!validId(req.params.id)) return fail(res, 404, 'Product type not found.');
-    const inputs = { typeId: [sql.Int, Number(req.params.id)] };
-    const typeResult = await db.query('SELECT id, name FROM dbo.product_types WHERE id = @typeId', inputs);
+    const inputs = { typeId: [sql.Int, Number(req.params.id)], companyId: [sql.Int, req.company.id] };
+    const typeResult = await db.query('SELECT id, name FROM dbo.product_types WHERE id = @typeId AND company_id = @companyId', inputs);
     const type = typeResult.recordset[0];
     if (!type) return fail(res, 404, 'Product type not found.');
-    const products = await db.query(`${productSelect} WHERE p.product_type_id = @typeId ORDER BY p.mak_item_code, p.id`, inputs);
+    const products = await db.query(`${productSelect} WHERE p.product_type_id = @typeId AND p.company_id = @companyId ORDER BY p.mak_item_code, p.id`, inputs);
     if (!products.recordset.length) return res.json({ type, histories: [] });
     const receiving = await db.query(`
       SELECT t.id, t.product_id AS productId, CONVERT(char(10), t.receiving_date, 23) AS [date], t.quantity,
              t.material_lot_number AS materialLotNumber, t.mak_release_number AS makReleaseNumber, t.remarks
       FROM dbo.receiving_transactions t JOIN dbo.products p ON p.id = t.product_id
-      WHERE p.product_type_id = @typeId ORDER BY t.receiving_date, t.id
+      WHERE p.product_type_id = @typeId AND p.company_id = @companyId ORDER BY t.receiving_date, t.id
     `, inputs);
     const usage = await db.query(`
       SELECT t.id, t.product_id AS productId, CONVERT(char(10), t.usage_date, 23) AS [date], t.quantity,
              t.material_lot_number AS materialLotNumber, t.mak_lot_number AS makLotNumber, t.remarks
       FROM dbo.usage_transactions t JOIN dbo.products p ON p.id = t.product_id
-      WHERE p.product_type_id = @typeId ORDER BY t.usage_date, t.id
+      WHERE p.product_type_id = @typeId AND p.company_id = @companyId ORDER BY t.usage_date, t.id
     `, inputs);
     const histories = products.recordset.map((product) => ({ product, receiving: [], usage: [] }));
     const byProduct = new Map(histories.map((history) => [String(history.product.id), history]));
@@ -165,11 +174,12 @@ export function createApp(db = database, {
     if (typeId !== null && !validId(typeId)) return fail(res, 400, 'Select a valid product type.');
     const result = await db.query(`
       ${productSelect}
-      WHERE (@search = N'' OR p.name LIKE N'%' + @search + N'%'
+      WHERE p.company_id = @companyId
+        AND (@search = N'' OR p.name LIKE N'%' + @search + N'%'
              OR p.item_code LIKE N'%' + @search + N'%' OR p.mak_item_code LIKE N'%' + @search + N'%')
         AND (@typeId IS NULL OR p.product_type_id = @typeId)
       ORDER BY p.name
-    `, { search: [sql.NVarChar(sql.MAX), search], typeId: [sql.Int, typeId] });
+    `, { search: [sql.NVarChar(sql.MAX), search], typeId: [sql.Int, typeId], companyId: [sql.Int, req.company.id] });
     res.json(result.recordset);
   }));
   app.post('/api/products', route(async (req, res) => {
@@ -177,11 +187,11 @@ export function createApp(db = database, {
     if (errorMessage) return fail(res, 400, errorMessage);
     try {
       const result = await db.query(`
-        INSERT INTO dbo.products (product_type_id, name, item_code, mak_item_code, unit, comment, created_at, updated_at)
-        VALUES (@productTypeId, @name, @itemCode, @makItemCode, @unit, @comment, SYSUTCDATETIME(), SYSUTCDATETIME());
+        INSERT INTO dbo.products (product_type_id, company_id, name, item_code, mak_item_code, unit, comment, created_at, updated_at)
+        VALUES (@productTypeId, @companyId, @name, @itemCode, @makItemCode, @unit, @comment, SYSUTCDATETIME(), SYSUTCDATETIME());
         SELECT CAST(SCOPE_IDENTITY() AS int) AS id;
-      `, productInputs(req.body));
-      res.status(201).json(await getProduct(result.recordset[0].id));
+      `, { ...productInputs(req.body), companyId: [sql.Int, req.company.id] });
+      res.status(201).json(await getProduct(result.recordset[0].id, req.company.id));
     } catch (error) {
       if (duplicate(error)) return fail(res, 409, 'That MAK Item Code already exists for the selected product type.');
       if (error.number === 547) return fail(res, 400, 'Select a valid product type.');
@@ -196,11 +206,11 @@ export function createApp(db = database, {
       const result = await db.query(`
         UPDATE dbo.products SET product_type_id = @productTypeId, name = @name, item_code = @itemCode,
           mak_item_code = @makItemCode, unit = @unit, comment = @comment, updated_at = SYSUTCDATETIME()
-        WHERE id = @id;
+        WHERE id = @id AND company_id = @companyId;
         SELECT @@ROWCOUNT AS matched;
-      `, { ...productInputs(req.body), id: [sql.Int, Number(req.params.id)] });
+      `, { ...productInputs(req.body), id: [sql.Int, Number(req.params.id)], companyId: [sql.Int, req.company.id] });
       if (!result.recordset[0].matched) return fail(res, 404, 'Product not found.');
-      res.json(await getProduct(req.params.id));
+      res.json(await getProduct(req.params.id, req.company.id));
     } catch (error) {
       if (duplicate(error)) return fail(res, 409, 'That MAK Item Code already exists for the selected product type.');
       if (error.number === 547) return fail(res, 400, 'Select a valid product type.');
@@ -218,9 +228,10 @@ export function createApp(db = database, {
              ${kind === 'usage' ? 't.mak_lot_number AS makLotNumber,' : 't.mak_release_number AS makReleaseNumber,'}
              t.remarks, p.name AS productName, p.item_code AS itemCode, pt.name AS productType, p.unit
       FROM dbo.${table} t JOIN dbo.products p ON p.id = t.product_id
-      JOIN dbo.product_types pt ON pt.id = p.product_type_id
+      JOIN dbo.product_types pt ON pt.id = p.product_type_id AND pt.company_id = p.company_id
+      WHERE p.company_id = @companyId
       ORDER BY t.${dateColumn} DESC, t.id DESC
-    `);
+    `, { companyId: [sql.Int, req.company.id] });
     res.json(result.recordset);
   }));
   app.post('/api/transactions/receiving', route(async (req, res) => {
@@ -230,7 +241,7 @@ export function createApp(db = database, {
     const errorMessage = transactionError(body, 'receiving');
     if (errorMessage) return fail(res, 400, errorMessage);
     const result = await db.transaction(async (executor) => {
-      if (!await lockProduct(body.productId, executor)) return { status: 404, error: 'Product not found.' };
+      if (!await lockProduct(body.productId, req.company.id, executor)) return { status: 404, error: 'Product not found.' };
       const inserted = await db.query(`
         INSERT INTO dbo.receiving_transactions (product_id, receiving_date, quantity, material_lot_number, mak_release_number, remarks, added_by_user_id, created_at)
         VALUES (@productId, @date, @quantity, @materialLotNumber, @makReleaseNumber, @remarks, @addedByUserId, SYSUTCDATETIME());
@@ -245,8 +256,8 @@ export function createApp(db = database, {
     const errorMessage = transactionError(req.body, 'usage');
     if (errorMessage) return fail(res, 400, errorMessage);
     const result = await db.transaction(async (executor) => {
-      if (!await lockProduct(req.body.productId, executor)) return { status: 404, error: 'Product not found.' };
-      const product = await getProduct(req.body.productId, executor);
+      if (!await lockProduct(req.body.productId, req.company.id, executor)) return { status: 404, error: 'Product not found.' };
+      const product = await getProduct(req.body.productId, req.company.id, executor);
       const inputs = transactionInputs(req.body, 'usage');
       const balance = Number(product.availableBalance);
       if (req.body.quantity > balance) {
@@ -267,7 +278,7 @@ export function createApp(db = database, {
         VALUES (@productId, @date, @quantity, @materialLotNumber, @makLotNumber, @remarks, @addedByUserId, SYSUTCDATETIME());
         SELECT CAST(SCOPE_IDENTITY() AS int) AS id;
       `, { ...inputs, addedByUserId: [sql.Int, req.user.id] }, executor);
-      return { status: 201, id: inserted.recordset[0].id, product: await getProduct(req.body.productId, executor) };
+      return { status: 201, id: inserted.recordset[0].id, product: await getProduct(req.body.productId, req.company.id, executor) };
     });
     if (result.error) return fail(res, result.status, result.error);
     res.status(201).json(result);
@@ -284,14 +295,14 @@ export function createApp(db = database, {
     const table = kind === 'receiving' ? 'receiving_transactions' : 'usage_transactions';
     const dateColumn = kind === 'receiving' ? 'receiving_date' : 'usage_date';
     const result = await db.transaction(async (executor) => {
-      if (!await lockProduct(body.productId, executor)) return { status: 404, error: 'Product not found.' };
+      if (!await lockProduct(body.productId, req.company.id, executor)) return { status: 404, error: 'Product not found.' };
       const existingResult = await db.query(`
         SELECT quantity, material_lot_number AS materialLotNumber
         FROM dbo.${table} WITH (UPDLOCK, HOLDLOCK) WHERE id = @id AND product_id = @productId
       `, { id: [sql.Int, Number(req.params.id)], productId: [sql.Int, Number(body.productId)] }, executor);
       const existing = existingResult.recordset[0];
       if (!existing) return { status: 404, error: 'Transaction not found.' };
-      const product = await getProduct(body.productId, executor);
+      const product = await getProduct(body.productId, req.company.id, executor);
       if (kind === 'usage') {
         const availableBalance = Number(product.availableBalance) + Number(existing.quantity);
         if (body.quantity > availableBalance) {
@@ -348,12 +359,12 @@ export function createApp(db = database, {
   }));
   app.get('/api/products/:id/material-lots', route(async (req, res) => {
     if (!validId(req.params.id)) return fail(res, 404, 'Product not found.');
-    if (!await getProduct(req.params.id)) return fail(res, 404, 'Product not found.');
+    if (!await getProduct(req.params.id, req.company.id)) return fail(res, 404, 'Product not found.');
     res.json(await getMaterialLots(req.params.id));
   }));
   app.get('/api/products/:id/history', route(async (req, res) => {
     if (!validId(req.params.id)) return fail(res, 404, 'Product not found.');
-    const product = await getProduct(req.params.id);
+    const product = await getProduct(req.params.id, req.company.id);
     if (!product) return fail(res, 404, 'Product not found.');
     const inputs = { productId: [sql.Int, Number(req.params.id)] };
     const receiving = await db.query(`

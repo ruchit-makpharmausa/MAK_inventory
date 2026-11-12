@@ -9,6 +9,7 @@ function recoveryDatabase(user, { failSessionDelete = false } = {}) {
   const sessionIds = [7, 7, 8];
   const token = {};
   const sessions = new Map();
+  const company = { companyId: 17, companyName: 'Quten', companyCode: 'TRV' };
   const db = {
     calls, sessionIds, user, token, committed: false, rolledBack: false,
     async query(statement, parameters, executor) {
@@ -18,11 +19,21 @@ function recoveryDatabase(user, { failSessionDelete = false } = {}) {
         return { recordset: user?.username === parameters.username[1] ? [{ ...user }] : [] };
       }
       if (statement.includes('INSERT INTO dbo.user_sessions')) {
-        sessions.set(parameters.tokenHash[1], parameters.userId[1]);
+        sessions.set(parameters.tokenHash[1], { userId: parameters.userId[1], companyId: null });
         return { recordset: [] };
       }
       if (statement.includes('FROM dbo.user_sessions s JOIN dbo.app_users u')) {
-        return { recordset: user && sessions.get(parameters.tokenHash[1]) === user.id ? [{ ...user }] : [] };
+        const session = sessions.get(parameters.tokenHash[1]);
+        return { recordset: user && session?.userId === user.id
+          ? [{ ...user, ...(session.companyId ? company : {}) }] : [] };
+      }
+      if (statement.includes('FROM dbo.companies WHERE id = @companyId AND is_active = 1')) {
+        return { recordset: [company] };
+      }
+      if (statement.includes('UPDATE dbo.user_sessions SET current_company_id = @companyId')) {
+        const session = sessions.get(parameters.tokenHash[1]);
+        if (session) session.companyId = parameters.companyId[1];
+        return { recordset: [] };
       }
       if (statement.includes('FROM dbo.products p')) return { recordset: [] };
       if (statement.includes('UPDATE dbo.app_users')) {
@@ -32,7 +43,7 @@ function recoveryDatabase(user, { failSessionDelete = false } = {}) {
       }
       if (statement.includes('DELETE FROM dbo.user_sessions')) {
         if (failSessionDelete) throw Object.assign(new Error('Session deletion failed'), { number: 229 });
-        for (const [hash, id] of sessions) if (id === parameters.userId[1]) sessions.delete(hash);
+        for (const [hash, session] of sessions) if (session.userId === parameters.userId[1]) sessions.delete(hash);
         const remaining = sessionIds.filter((id) => id !== parameters.userId[1]);
         sessionIds.splice(0, sessionIds.length, ...remaining);
         return { recordset: [] };
@@ -165,6 +176,12 @@ test('login recovers with a six-character reset password and invalidates the pre
     assert.equal(recovered.status, 200);
     assert.equal((await recovered.json()).user.username, 'test.user');
     const newCookie = recovered.headers.get('set-cookie').split(';')[0];
+    assert.equal((await fetch(`${url}/api/products`, { headers: { Cookie: newCookie } })).status, 409);
+    const selected = await fetch(`${url}/api/auth/company`, {
+      method: 'POST', headers: { Cookie: newCookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ companyId: 17 }),
+    });
+    assert.equal(selected.status, 200);
     assert.equal((await fetch(`${url}/api/products`, { headers: { Cookie: newCookie } })).status, 200);
   } finally {
     await new Promise((resolve) => server.close(resolve));

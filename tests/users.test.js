@@ -25,8 +25,10 @@ async function withApi(run) {
   const login = async (username = 'admin.test', password = 'fixture-password-123') => {
     const result = await request('/api/auth/login', { body: { username, password } });
     assert.equal(result.status, 200);
+    const selected = await request('/api/auth/company', { cookie: result.cookie, body: { companyId: 17 } });
+    assert.equal(selected.status, 200);
     return result.cookie;
-  };
+  }; 
   try { await run({ db, request, login }); }
   finally { await new Promise((resolve) => server.close(resolve)); }
 }

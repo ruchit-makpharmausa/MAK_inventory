@@ -1,7 +1,7 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { navigation } from '../lib/routes.js';
 
-export default function AppLayout({ user, message, onSignOut, onDismiss }) {
+export default function AppLayout({ user, message, onSignOut, onSwitchCompany, onDismiss }) {
   const location = useLocation();
   const items = navigation.filter((item) => !item.adminOnly || user.isAdmin);
   const pageTitle = items.find((item) => item.path === location.pathname.replace(/\/+$/, ''))?.label || 'Page not found';
@@ -26,7 +26,9 @@ export default function AppLayout({ user, message, onSignOut, onDismiss }) {
         <div className="mobile-brand">MAK <span>Inventory</span></div>
         <div className="breadcrumb">Workspace <span>/</span> <strong>{pageTitle}</strong></div>
         <div className="topbar-account">
-          <div className="company-chip">{user.displayName || user.username}</div>
+          <div className="company-chip">{user.company.name} · {user.company.code}</div>
+          <span className="account-name">{user.displayName || user.username}</span>
+          <button className="button secondary" onClick={onSwitchCompany}>Change company</button>
           <button className="button secondary signout-button" onClick={onSignOut}>Sign out</button>
         </div>
       </header>

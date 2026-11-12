@@ -6,7 +6,11 @@ const cookieName = 'mak_inventory_session';
 const sessionSeconds = 8 * 60 * 60;
 const dummyHash = `scrypt$${'0'.repeat(32)}$${'0'.repeat(128)}`;
 const tokenHash = (token) => createHash('sha256').update(token).digest('hex');
-const publicUser = (user) => ({ id: user.id, username: user.username, displayName: user.displayName, isAdmin: user.isAdmin === true || user.isAdmin === 1 });
+const publicUser = (user) => ({
+  id: user.id, username: user.username, displayName: user.displayName,
+  isAdmin: user.isAdmin === true || user.isAdmin === 1,
+  company: user.companyId ? { id: user.companyId, name: user.companyName, code: user.companyCode } : null,
+});
 
 export function sessionToken(req) {
   const value = (req.headers.cookie || '').split(';').map((part) => part.trim())
@@ -32,8 +36,10 @@ export function mountAuthentication(app, db) {
     const token = sessionToken(req);
     if (!token) return null;
     const result = await db.query(`
-      SELECT u.id, u.username, u.display_name AS displayName, u.is_admin AS isAdmin
+      SELECT u.id, u.username, u.display_name AS displayName, u.is_admin AS isAdmin,
+             c.id AS companyId, c.name AS companyName, c.code AS companyCode
       FROM dbo.user_sessions s JOIN dbo.app_users u ON u.id = s.user_id
+      LEFT JOIN dbo.companies c ON c.id = s.current_company_id AND c.is_active = 1
       WHERE s.token_hash = @tokenHash AND s.expires_at > SYSUTCDATETIME() AND u.is_active = 1
     `, { tokenHash: [sql.Char(64), tokenHash(token)] });
     return result.recordset[0] || null;
@@ -88,8 +94,8 @@ export function mountAuthentication(app, db) {
     const previousToken = sessionToken(req);
     await db.query(`
       DELETE FROM dbo.user_sessions WHERE expires_at <= SYSUTCDATETIME() OR token_hash = @previousTokenHash;
-      INSERT INTO dbo.user_sessions (token_hash, user_id, expires_at)
-      VALUES (@tokenHash, @userId, DATEADD(second, @sessionSeconds, SYSUTCDATETIME()));
+      INSERT INTO dbo.user_sessions (token_hash, user_id, current_company_id, expires_at)
+      VALUES (@tokenHash, @userId, NULL, DATEADD(second, @sessionSeconds, SYSUTCDATETIME()));
     `, {
       tokenHash: [sql.Char(64), tokenHash(token)], userId: [sql.Int, user.id],
       sessionSeconds: [sql.Int, sessionSeconds],
@@ -117,7 +123,37 @@ export function mountAuthentication(app, db) {
         return res.status(401).json({ error: 'Please sign in to continue.' });
       }
       req.user = publicUser(user);
+      if (req.path === '/companies' || req.path.startsWith('/companies/')
+          || ['/auth/company', '/auth/company/clear'].includes(req.path)) return next();
+      if (!req.user.company) return res.status(409).json({ error: 'Choose a company to continue.' });
+      req.company = req.user.company;
       next();
     }).catch((error) => forwardError(error, next));
   });
+
+  app.post('/api/auth/company', route(async (req, res) => {
+    const companyId = Number(req.body?.companyId);
+    if (!Number.isInteger(companyId) || companyId <= 0 || companyId > 2147483647) {
+      return res.status(400).json({ error: 'Choose a valid company.' });
+    }
+    const companyResult = await db.query(`
+      SELECT id AS companyId, name AS companyName, code AS companyCode
+      FROM dbo.companies WHERE id = @companyId AND is_active = 1
+    `, { companyId: [sql.Int, companyId] });
+    const company = companyResult.recordset[0];
+    if (!company) return res.status(404).json({ error: 'Company not found or archived.' });
+    const token = sessionToken(req);
+    await db.query(`UPDATE dbo.user_sessions SET current_company_id = @companyId WHERE token_hash = @tokenHash`, {
+      companyId: [sql.Int, companyId], tokenHash: [sql.Char(64), tokenHash(token)],
+    });
+    res.json({ user: publicUser({ ...req.user, ...company }) });
+  }));
+
+  app.post('/api/auth/company/clear', route(async (req, res) => {
+    const token = sessionToken(req);
+    await db.query('UPDATE dbo.user_sessions SET current_company_id = NULL WHERE token_hash = @tokenHash', {
+      tokenHash: [sql.Char(64), tokenHash(token)],
+    });
+    res.json({ user: publicUser({ ...req.user, companyId: null, companyName: null, companyCode: null }) });
+  }));
 }
