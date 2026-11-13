@@ -68,7 +68,7 @@ export function mountLotInventory(app, db) {
     const lotScope = unassigned ? `${normalizedLot} IS NULL`
       : `${normalizedLot} = @materialLotNumber COLLATE Latin1_General_100_BIN2`;
     const receiving = await db.query(`
-      SELECT id, CONVERT(char(10), receiving_date, 23) AS [date], quantity,
+      SELECT id, CONVERT(char(10), receiving_date, 23) AS [date], quantity, location,
              ${normalizedLot} AS materialLotNumber, mak_release_number AS makReleaseNumber, remarks
       FROM dbo.receiving_transactions
       WHERE product_id = @productId AND ${lotScope}

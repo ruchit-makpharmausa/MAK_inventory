@@ -10,7 +10,7 @@ export const expectedColumns = {
   product_types: ['id', 'name', 'company_id', 'created_at'],
   products: ['id', 'product_type_id', 'company_id', 'name', 'item_code', 'mak_item_code', 'unit', 'comment', 'created_at', 'updated_at'],
   user_sessions: ['token_hash', 'user_id', 'current_company_id', 'expires_at', 'created_at'],
-  receiving_transactions: ['id', 'product_id', 'receiving_date', 'quantity', 'material_lot_number', 'mak_release_number', 'remarks', 'added_by_user_id', 'created_at'],
+  receiving_transactions: ['id', 'product_id', 'receiving_date', 'quantity', 'location', 'material_lot_number', 'mak_release_number', 'remarks', 'added_by_user_id', 'created_at'],
   usage_transactions: ['id', 'product_id', 'usage_date', 'quantity', 'material_lot_number', 'mak_lot_number', 'remarks', 'added_by_user_id', 'created_at'],
 };
 

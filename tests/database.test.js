@@ -37,6 +37,13 @@ test('existing schema is checked using only a read; missing columns stop connect
   await assert.rejects(verifyExistingSchema(pool), (error) => error.status === 503 && /mak_item_code/.test(error.message));
 });
 
+test('the receiving location column is required before accepting transactions', async () => {
+  const rows = Object.entries(expectedColumns).flatMap(([tableName, columns]) => columns
+    .filter((columnName) => columnName !== 'location').map((columnName) => ({ tableName, columnName })));
+  const pool = { request: () => ({ async query() { return { recordset: rows }; } }) };
+  await assert.rejects(verifyExistingSchema(pool), (error) => error.status === 503 && /dbo\.receiving_transactions\.location/.test(error.message));
+});
+
 test('the receiving release-number schema is required before accepting new separate material lots', async () => {
   const rows = Object.entries(expectedColumns).flatMap(([tableName, columns]) => columns
     .filter((columnName) => columnName !== 'mak_release_number').map((columnName) => ({ tableName, columnName })));

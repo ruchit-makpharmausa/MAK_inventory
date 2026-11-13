@@ -4,7 +4,7 @@ import { createProductHistoryPdf } from '../src/lib/product-history-pdf.js';
 import { productHistoryFilename } from '../src/lib/product-history-report.js';
 
 const product = { name: 'Selected product - IFC', itemCode: '000123', makItemCode: 'MAK-001', productType: 'IFC', unit: 'Pcs' };
-const receipt = { id: 1, date: '2026-10-12', quantity: 3600 };
+const receipt = { id: 1, date: '2026-10-12', quantity: 3600, location: 'A2A' };
 const usage = { id: 1, date: '2026-10-13', quantity: 100.125, makLotNumber: 'M12345' };
 
 test('product PDF preserves ledger columns, chronological data, quantities and lot styling', async () => {
@@ -15,14 +15,16 @@ test('product PDF preserves ledger columns, chronological data, quantities and l
   assert.ok(output.startsWith('%PDF-'));
   assert.match(output, /%%EOF\s*$/);
   const table = doc.lastAutoTable;
-  assert.equal(table.columns.length, 7);
-  const keys = ['date', 'materialLotNumber', 'releaseNumber', 'description', 'receivedQuantity', 'usedQuantity', 'usedAgainst'];
+  assert.equal(table.columns.length, 8);
+  const keys = ['date', 'materialLotNumber', 'location', 'releaseNumber', 'description', 'receivedQuantity', 'usedQuantity', 'usedAgainst'];
   assert.deepEqual(keys.map((key) => table.head[0].cells[key].text.join(' ')),
-    ['Date', 'Material Lot Number', 'MAK Release Number', 'Item/Description', 'Qty', 'Used Qty', 'Used Against(MAK Lot No)']);
+    ['Date', 'Material Lot Number', 'Location', 'MAK Release Number', 'Item/Description', 'Qty', 'Used Qty', 'Used Against(MAK Lot No)']);
   assert.equal(table.body.length, 2);
   assert.equal(table.body[0].cells.date.text.join(''), '10/12/26');
   assert.equal(table.body[0].cells.materialLotNumber.text.join(''), '');
+  assert.equal(table.body[0].cells.location.text.join(''), 'A2A');
   assert.equal(table.body[1].cells.materialLotNumber.text.join(''), 'N/A');
+  assert.equal(table.body[1].cells.location.text.join(''), '');
   assert.equal(table.body[0].cells.date.styles.fontSize, 10);
   assert.equal(table.body[0].cells.releaseNumber.text.join(''), '000RN-01');
   assert.equal(table.body[1].cells.releaseNumber.text.join(''), '');
@@ -40,10 +42,10 @@ test('product PDF preserves ledger columns, chronological data, quantities and l
   assert.ok(output.includes('8 Middlebury Blvd, Randolph, NJ - 07869'));
   assert.ok(output.includes('makpharmausa.com'));
   assert.equal(table.foot[0].cells[0].text.join(''), 'Closing balance');
-  assert.equal(table.foot[0].cells[5].text.join(''), '3,499.875 Pcs');
-  assert.deepEqual(table.foot[0].cells[5].styles.textColor, [22, 122, 74]);
-  assert.deepEqual(table.foot[0].cells[5].styles.fillColor, [235, 247, 239]);
-  assert.equal(table.foot[0].cells[5].styles.halign, 'right');
+  assert.equal(table.foot[0].cells[6].text.join(''), '3,499.875 Pcs');
+  assert.deepEqual(table.foot[0].cells[6].styles.textColor, [22, 122, 74]);
+  assert.deepEqual(table.foot[0].cells[6].styles.fillColor, [235, 247, 239]);
+  assert.equal(table.foot[0].cells[6].styles.halign, 'right');
   assert.ok(output.includes('Page 1 of 1'));
   assert.equal(JSON.stringify(history), original);
 });
@@ -80,7 +82,7 @@ test('long PDF histories repeat report and table headers and number every page',
     assert.ok(content.includes('(8 Middlebury Blvd, Randolph, NJ - 07869)'));
     assert.ok(content.includes('(makpharmausa.com)'));
     assert.ok(content.includes('(MAK Release') && content.includes('Number)'));
-    assert.ok(content.includes('Material Lot Number'));
+    assert.ok(content.includes('Material Lot') && content.includes('Number'));
     assert.equal(content.includes('(Closing balance)'), page === pages);
   }
   assert.equal((output.match(/\(Closing balance\)/g) || []).length, 1);
@@ -94,10 +96,10 @@ test('closing balance reflects the printed ledger, including fractional zero and
     [[{ ...receipt, quantity: 0.3 }], [{ ...usage, quantity: 0.1 }, { ...usage, quantity: 0.2 }], '0 Pcs'],
   ]) {
     const doc = await createProductHistoryPdf({ product, receiving, usage: usageRows });
-    assert.equal(doc.lastAutoTable.foot[0].cells[5].text.join(''), expected);
+    assert.equal(doc.lastAutoTable.foot[0].cells[6].text.join(''), expected);
   }
   const noUnit = await createProductHistoryPdf({ product: { name: 'Sample' }, receiving: [receipt], usage: [] });
-  assert.equal(noUnit.lastAutoTable.foot[0].cells[5].text.join(''), '3,600');
+  assert.equal(noUnit.lastAutoTable.foot[0].cells[6].text.join(''), '3,600');
   await assert.rejects(createProductHistoryPdf({ product, receiving: [{ ...receipt, quantity: 1e308 }, { ...receipt, quantity: 1e308 }], usage: [] }), /Closing balance must be a finite number/);
 });
 
@@ -116,14 +118,14 @@ test('release identifiers wrap without truncation and the final balance stays in
   assert.equal(table.body[1].cells.releaseNumber.text.join(''), '');
   assert.ok(table.body[0].cells.date.y >= table.settings.margin.top);
   assert.ok(table.finalY <= doc.internal.pageSize.getHeight() - table.settings.margin.bottom);
-  assert.equal(table.foot[0].cells[0].colSpan, 5);
-  assert.equal(table.foot[0].cells[5].colSpan, 2);
+  assert.equal(table.foot[0].cells[0].colSpan, 6);
+  assert.equal(table.foot[0].cells[6].colSpan, 2);
 });
 
 test('empty PDF reports are downloadable and invalid histories fail clearly', async () => {
   const doc = await createProductHistoryPdf({ product, receiving: [], usage: [] });
   assert.ok(doc.output().includes('No transactions recorded for this product.'));
-  assert.equal(doc.lastAutoTable.foot[0].cells[5].text.join(''), '0 Pcs');
+  assert.equal(doc.lastAutoTable.foot[0].cells[6].text.join(''), '0 Pcs');
   assert.doesNotMatch(doc.output(), /Transaction Notes/);
   const blob = doc.output('blob');
   assert.equal(blob.type, 'application/pdf');

@@ -7,6 +7,12 @@ export default function TransactionFields({ kind, productId = '', unit = '', val
     <label>{receiving ? 'Receiving' : 'Usage'} date <span className="required">*</span>
       <input name={receiving ? 'receivingDate' : 'usageDate'} type="date" required defaultValue={values.date || today()} />
     </label>
+    {receiving && <label>Location <span className="required">*</span>
+      <input name="location" list="receiving-location-options" required maxLength={50} placeholder="e.g. A2A" defaultValue={values.location || ''} />
+      <datalist id="receiving-location-options">
+        <option value="A2A" /><option value="A2B" /><option value="A2C" />
+      </datalist>
+    </label>}
     <label>{receiving ? 'Received quantity' : 'Quantity used'} <span className="required">*</span>
       <input name="quantity" type="number" min="0" step="any" required placeholder="Enter quantity" defaultValue={values.quantity ?? ''} />
     </label>

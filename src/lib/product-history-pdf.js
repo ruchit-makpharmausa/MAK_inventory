@@ -70,23 +70,24 @@ export async function createProductHistoryPdf(history) {
     footStyles: { fillColor: [235, 247, 239], textColor: [22, 122, 74], fontStyle: 'bold', halign: 'right' },
     showHead: 'everyPage', showFoot: 'lastPage', rowPageBreak: 'avoid', willDrawPage: drawHeader,
   };
-  const keys = ['date', 'materialLotNumber', 'releaseNumber', 'description', 'receivedQuantity', 'usedQuantity', 'usedAgainst'];
-  const headers = [...productHistoryHeaders.slice(0, 2), 'MAK Release Number', ...productHistoryHeaders.slice(2)];
+  const keys = ['date', 'materialLotNumber', 'location', 'releaseNumber', 'description', 'receivedQuantity', 'usedQuantity', 'usedAgainst'];
+  const headers = [...productHistoryHeaders.slice(0, 3), 'MAK Release Number', ...productHistoryHeaders.slice(3)];
   autoTable(doc, {
     ...tableOptions, startY: tableTop,
     columns: headers.map((header, index) => ({ header, dataKey: keys[index] })),
     body: entries.map((entry) => ({
-      date: dateLabel(entry.date), materialLotNumber: entry.materialLotNumber, releaseNumber: entry.releaseNumber, description: entry.description,
+      date: dateLabel(entry.date), materialLotNumber: entry.materialLotNumber, location: entry.location,
+      releaseNumber: entry.releaseNumber, description: entry.description,
       receivedQuantity: numberLabel(entry.receivedQuantity), usedQuantity: numberLabel(entry.usedQuantity),
       usedAgainst: entry.usedAgainst, receiving: entry.receiving,
     })),
     foot: [[
-      { content: 'Closing balance', colSpan: 5 },
+      { content: 'Closing balance', colSpan: 6 },
       { content: closingBalanceLabel, colSpan: 2 },
     ]],
     columnStyles: {
-      date: { cellWidth: 23 }, materialLotNumber: { cellWidth: 39 }, releaseNumber: { cellWidth: 39 },
-      description: { cellWidth: availableWidth - 193 },
+      date: { cellWidth: 20 }, materialLotNumber: { cellWidth: 31 }, location: { cellWidth: 22 }, releaseNumber: { cellWidth: 31 },
+      description: { cellWidth: availableWidth - 196 },
       receivedQuantity: { cellWidth: 24, halign: 'right' }, usedQuantity: { cellWidth: 24, halign: 'right' },
       usedAgainst: { cellWidth: 44 },
     },

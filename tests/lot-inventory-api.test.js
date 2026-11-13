@@ -9,7 +9,7 @@ const lotWhitespace = '\u0009\u000a\u000b\u000c\u000d\u0020\u00a0\u1680\u2000\u2
 const normalizedLot = "NULLIF(TRIM(@lotWhitespace COLLATE Latin1_General_100_BIN2 FROM material_lot_number COLLATE Latin1_General_100_BIN2) COLLATE Latin1_General_100_BIN2, N'' COLLATE Latin1_General_100_BIN2)";
 const product = { id: 17, name: 'Shared product', itemCode: 'CODE', makItemCode: 'MAK-CODE', productTypeId: 1, productType: 'Label', unit: 'Pcs' };
 const otherProduct = { ...product, id: 18, productTypeId: 2, productType: 'Bulk' };
-const receipt = { id: 3, date: '2026-01-01', quantity: 4.5, materialLotNumber: 'LOT', makReleaseNumber: 'RELEASE', remarks: 'Received' };
+const receipt = { id: 3, date: '2026-01-01', quantity: 4.5, location: 'A2A', materialLotNumber: 'LOT', makReleaseNumber: 'RELEASE', remarks: 'Received' };
 const usage = { id: 8, date: '2026-01-02', quantity: 2.25, materialLotNumber: 'LOT', makLotNumber: 'MAK-LOT', remarks: 'Used' };
 
 function mockDatabase(responses = []) {
@@ -172,6 +172,7 @@ test('history is scoped to exact product ID and normalized case-sensitive lot, p
       assert.doesNotMatch(call.statement, /\bOR\b|LIKE|LOWER|UPPER|TOP\b|OFFSET|FETCH/i);
     }
     assert.match(receiving.statement, /CONVERT\(char\(10\), receiving_date, 23\) AS \[date\]/);
+    assert.match(receiving.statement, /quantity, location/);
     assert.match(receiving.statement, /mak_release_number AS makReleaseNumber, remarks/);
     assert.match(receiving.statement, /ORDER BY receiving_date ASC, id ASC/);
     assert.match(used.statement, /CONVERT\(char\(10\), usage_date, 23\) AS \[date\]/);

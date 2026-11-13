@@ -5,16 +5,18 @@ export default function HistoryTable({ title, subtitle, rows, receiving = false,
     <div className="panel-heading"><div><h2>{title}</h2><p>{subtitle}</p></div>
       <span className="count-pill">{rows.length} entries</span></div>
     {!rows.length ? <div className="empty-state compact"><span>No {receiving ? 'receiving' : 'usage'} records for this product.</span></div>
-      : <div className="table-scroll"><table className="history-table" aria-label={title}>
+      : <div className="table-scroll"><table className={`history-table${receiving ? ' receiving-history-table' : ''}`} aria-label={title}>
         <colgroup>
           <col className="history-date-column" />
+          {receiving && <col className="history-location-column" />}
           <col className="history-reference-column" />
           <col className="history-quantity-column" />
           <col className="history-remarks-column" />
-          {isAdmin && <col />}
+          {isAdmin && <col className="history-actions-column" />}
         </colgroup>
         <thead><tr>
           <th scope="col">Date</th>
+          {receiving && <th scope="col">Location</th>}
           <th scope="col">{receiving ? 'MAK Release Number' : 'MAK lot number'}</th>
           <th scope="col" className="numeric">{receiving ? 'Received quantity' : 'Used quantity'}</th>
           <th scope="col">Remarks</th>
@@ -22,6 +24,7 @@ export default function HistoryTable({ title, subtitle, rows, receiving = false,
         </tr></thead>
         <tbody>{rows.map((row) => <tr key={row.id}>
           <td>{dateLabel(row.date)}</td>
+          {receiving && <td>{row.location || '—'}</td>}
           <td className={`history-reference${receiving ? '' : ' code-cell'}`}>
             {(receiving ? row.makReleaseNumber : row.makLotNumber) || '—'}
             {row.materialLotNumber && <div className="muted-label">Material lot number: {row.materialLotNumber}</div>}

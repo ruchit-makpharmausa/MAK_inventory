@@ -7,10 +7,10 @@ import { createServer } from 'vite';
 import { inventoryHistoryRows } from '../src/lib/csv.js';
 import { quantity } from '../src/lib/format.js';
 
-const receiving = { id: 1, date: '2026-10-01', makReleaseNumber: 'RN-2026-001', materialLotNumber: 'RECEIVED-MAT-LOT', quantity: 100000, remarks: 'Received' };
+const receiving = { id: 1, date: '2026-10-01', location: 'A2A', makReleaseNumber: 'RN-2026-001', materialLotNumber: 'RECEIVED-MAT-LOT', quantity: 100000, remarks: 'Received' };
 const usage = { id: 2, date: '2026-10-08', materialLotNumber: 'USED-MAT-LOT', makLotNumber: 'M1234', quantity: 2500, remarks: 'Used' };
 
-test('history tables keep four matching columns and aligned quantity headers', async (t) => {
+test('receiving history adds location while keeping quantity headers aligned', async (t) => {
   const vite = await createServer({ optimizeDeps: { noDiscovery: true, include: [] }, server: { middlewareMode: true, hmr: { server: createHttpServer() }, watch: null }, appType: 'custom' });
   try {
     const { default: HistoryTable } = await vite.ssrLoadModule('/src/components/HistoryTable.jsx');
@@ -19,6 +19,8 @@ test('history tables keep four matching columns and aligned quantity headers', a
     }));
     await t.test('receiving shows the existing reference as MAK Release Number', () => {
       const html = render(receiving, true);
+      assert.match(html, /<th scope="col">Location<\/th>/);
+      assert.match(html, /<td>A2A<\/td>/);
       assert.match(html, /<th scope="col">MAK Release Number<\/th>/);
       assert.match(html, /RN-2026-001/);
       assert.match(html, /Material lot number: RECEIVED-MAT-LOT/);
@@ -34,12 +36,15 @@ test('history tables keep four matching columns and aligned quantity headers', a
       assert.match(html, /<th scope="col" class="numeric">Used quantity<\/th>/);
       assert.ok(html.includes(`<td class="numeric">${quantity(usage.quantity)}</td>`));
     });
-    await t.test('both tables use the same quantity position and width classes', () => {
-      for (const html of [render(receiving, true), render(usage, false)]) {
-        assert.equal((html.match(/<th\b/g) || []).length, 4);
-        assert.equal((html.match(/<td\b/g) || []).length, 4);
-        assert.match(html, /<col class="history-date-column"\/><col class="history-reference-column"\/><col class="history-quantity-column"\/><col class="history-remarks-column"\/>/);
-      }
+    await t.test('receiving adds a location column while usage retains its existing table shape', () => {
+      const receivingHtml = render(receiving, true);
+      const usageHtml = render(usage, false);
+      assert.equal((receivingHtml.match(/<th\b/g) || []).length, 5);
+      assert.equal((receivingHtml.match(/<td\b/g) || []).length, 5);
+      assert.match(receivingHtml, /<col class="history-date-column"\/><col class="history-location-column"\/><col class="history-reference-column"\/><col class="history-quantity-column"\/><col class="history-remarks-column"\/>/);
+      assert.equal((usageHtml.match(/<th\b/g) || []).length, 4);
+      assert.equal((usageHtml.match(/<td\b/g) || []).length, 4);
+      assert.match(usageHtml, /<col class="history-date-column"\/><col class="history-reference-column"\/><col class="history-quantity-column"\/><col class="history-remarks-column"\/>/);
     });
     await t.test('empty histories and missing optional references remain readable', () => {
       assert.match(render(null, true), /No receiving records for this product/);
@@ -56,8 +61,8 @@ test('history tables keep four matching columns and aligned quantity headers', a
 
 test('history CSV uses the stored receiving reference and leaves the usage release-number column empty', () => {
   assert.deepEqual(inventoryHistoryRows({ receiving: [receiving], usage: [usage] }), [
-    ['Receiving', '2026-10-01', 'RN-2026-001', '', 100000, 'Received'],
-    ['Usage', '2026-10-08', '', 'M1234', 2500, 'Used'],
+    ['Receiving', '2026-10-01', 'A2A', 'RN-2026-001', '', 100000, 'Received'],
+    ['Usage', '2026-10-08', '', '', 'M1234', 2500, 'Used'],
   ]);
   assert.deepEqual(inventoryHistoryRows({ receiving: [], usage: [] }), []);
 });

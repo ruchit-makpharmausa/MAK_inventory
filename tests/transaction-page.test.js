@@ -13,12 +13,19 @@ function findElement(element, predicate) {
   return Children.toArray(element.props.children).map((child) => findElement(child, predicate)).find(Boolean);
 }
 
-test('material lots are optional in both forms and receiving keeps a separate optional MAK Release Number', async () => {
+test('receiving requires a location with suggestions and material lots stay optional in both forms', async () => {
   const vite = await createServer({ optimizeDeps: { noDiscovery: true, include: [] }, server: { middlewareMode: true, hmr: { server: createHttpServer() }, watch: null }, appType: 'custom' });
   try {
     const { default: TransactionPage } = await vite.ssrLoadModule('/src/components/TransactionPage.jsx');
     const render = (kind) => renderToStaticMarkup(createElement(TransactionPage, { kind, products: [], onSaved: async () => {} }));
     const receiving = render('receiving');
+    assert.match(receiving, /<label>Location <span class="required">\*<\/span>/);
+    const locationInput = receiving.match(/<input[^>]*name="location"[^>]*>/)?.[0];
+    assert.ok(locationInput);
+    assert.match(locationInput, /required=""/);
+    assert.match(locationInput, /maxLength="50"/);
+    assert.match(locationInput, /list="receiving-location-options"/);
+    assert.match(receiving, /<option value="A2A"><\/option><option value="A2B"><\/option><option value="A2C"><\/option>/);
     assert.match(receiving, /<label>MAK Release Number <span class="muted-label">\(optional\)<\/span>/);
     assert.doesNotMatch(receiving, /MAK RN Number|name="makRnNumber"/);
     const rnInput = receiving.match(/<input[^>]*name="makReleaseNumber"[^>]*>/)?.[0];

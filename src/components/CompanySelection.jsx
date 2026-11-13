@@ -93,7 +93,7 @@ export default function CompanySelection({ user, onSelected }) {
             <button type="button" className="button secondary" disabled={busy} onClick={() => selectCompany(company.id)}>
               <strong>{company.name}</strong><span>{company.code}</span>
             </button>
-            {user.isAdmin && company.code !== 'TRV' && <button type="button" className="text-button" disabled={busy}
+            {user.isAdmin && <button type="button" className="text-button" disabled={busy}
               onClick={() => archiveCompany(company)}>Archive</button>}
           </div>)}
         </div> : <div className="empty-state">No active companies are available.</div>}

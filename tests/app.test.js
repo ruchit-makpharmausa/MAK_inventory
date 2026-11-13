@@ -69,13 +69,15 @@ test('new receiving transactions record the authenticated user without returning
   const db = mockDatabase([[{ id: 17 }], [{ id: 99 }]]);
   await withApi(db, async (request) => {
     const result = await request('/api/transactions/receiving', {
-      productId: 17, receivingDate: '2026-10-17', quantity: 5, materialLotNumber: 'LOT-A', makReleaseNumber: 'RN-1',
+      productId: 17, receivingDate: '2026-10-17', quantity: 5, location: 'A2A', materialLotNumber: 'LOT-A', makReleaseNumber: 'RN-1',
     });
     assert.equal(result.status, 201);
     assert.equal(result.body.id, 99);
     assert.equal(Object.hasOwn(result.body, 'addedByUserId'), false);
     assert.equal(db.calls[1].parameters.addedByUserId[1], 1);
+    assert.equal(db.calls[1].parameters.location[1], 'A2A');
     assert.match(db.calls[1].statement, /added_by_user_id/);
+    assert.match(db.calls[1].statement, /location/);
   });
 });
 
@@ -103,6 +105,24 @@ test('only administrators can edit transactions and usage edits retain existing 
     assert.match(update.statement, /UPDATE dbo\.usage_transactions/);
     assert.doesNotMatch(update.statement, /added_by_user_id/);
     assert.equal(update.parameters.quantity[1], 4);
+  });
+});
+
+test('administrator receiving edits require and persist a location', async () => {
+  const db = mockDatabase([
+    [{ id: 17 }], [{ quantity: 5, materialLotNumber: null }], [product], [],
+  ], true);
+  await withApi(db, async (request) => {
+    const result = await request('/api/transactions/receiving/44', {
+      productId: 17, receivingDate: '2026-10-17', quantity: 4, location: ' A2B ',
+      makReleaseNumber: 'RN-1', materialLotNumber: '',
+    }, 'PUT');
+    assert.equal(result.status, 200);
+    assert.deepEqual(result.body, { id: 44 });
+    const update = db.calls.at(-1);
+    assert.match(update.statement, /UPDATE dbo\.receiving_transactions/);
+    assert.match(update.statement, /location = @location/);
+    assert.equal(update.parameters.location[1], 'A2B');
   });
 });
 
@@ -205,8 +225,8 @@ test('create and edit report same-type MAK Item Code conflicts from unique const
 
 test('identical names and codes in different types keep their histories scoped to product ID', async () => {
   const other = { ...product, id: 18, productTypeId: 2, productType: 'Bulk' };
-  const receipt = { id: 1, quantity: 10 };
-  const otherReceipt = { id: 2, quantity: 25 };
+  const receipt = { id: 1, quantity: 10, location: 'A2A' };
+  const otherReceipt = { id: 2, quantity: 25, location: 'A2B' };
   const db = mockDatabase([[product], [receipt], [], [other], [otherReceipt], []]);
   await withApi(db, async (request) => {
     for (const [row, expectedReceipt] of [[product, receipt], [other, otherReceipt]]) {
@@ -275,7 +295,7 @@ test('material lot availability returns an empty array for products without posi
 test('receiving locks the product and inserts the record in the same transaction', async () => {
   const db = mockDatabase([[{ id: 17 }], [{ id: 3 }]]);
   await withApi(db, async (request) => {
-    const result = await request('/api/transactions/receiving', { productId: 17, receivingDate: '2026-10-17', quantity: 5, materialLotNumber: 'LOT' });
+    const result = await request('/api/transactions/receiving', { productId: 17, receivingDate: '2026-10-17', quantity: 5, location: 'A2A', materialLotNumber: 'LOT' });
     assert.equal(result.status, 201);
     assert.equal(result.body.id, 3);
     assert.match(db.calls[0].statement, /UPDLOCK, HOLDLOCK/);
@@ -410,7 +430,7 @@ test('receiving and usage accept omitted, null, blank and whitespace-only option
       await withApi(db, async (request) => {
         const result = await request(`/api/transactions/${kind}`, {
           productId: 17, [`${kind === 'receiving' ? 'receiving' : 'usage'}Date`]: '2026-10-17', quantity: 5,
-          materialLotNumber, ...(kind === 'usage' ? { makLotNumber: 'MAK-LOT' } : { makReleaseNumber: materialLotNumber }),
+          materialLotNumber, ...(kind === 'usage' ? { makLotNumber: 'MAK-LOT' } : { location: 'A2B', makReleaseNumber: materialLotNumber }),
         });
         assert.equal(result.status, 201);
         const insert = db.calls.find((call) => /INSERT INTO dbo\.(receiving|usage)_transactions/.test(call.statement));
@@ -441,7 +461,8 @@ test('receiving and usage reject missing products under the lock without checkin
     const db = mockDatabase([[]]);
     await withApi(db, async (request) => {
       const result = await request(`/api/transactions/${kind}`, {
-        productId: 17, [`${kind}Date`]: '2026-10-17', quantity: 1, materialLotNumber: 'LOT', makLotNumber: 'MAK-LOT',
+        productId: 17, [`${kind}Date`]: '2026-10-17', quantity: 1, materialLotNumber: 'LOT',
+        ...(kind === 'receiving' ? { location: 'A2A' } : { makLotNumber: 'MAK-LOT' }),
       });
       assert.deepEqual(result, { status: 404, body: { error: 'Product not found.' } });
       assert.equal(db.calls.length, 1);
@@ -452,21 +473,25 @@ test('receiving and usage reject missing products under the lock without checkin
 });
 
 test('receiving persists independent MAK Release Number and material lot values and returns them in reads', async () => {
-  const receipt = { id: 3, makReleaseNumber: 'RN-001', materialLotNumber: 'MAT-001' };
+  const receipt = { id: 3, location: 'A2C', makReleaseNumber: 'RN-001', materialLotNumber: 'MAT-001' };
   const db = mockDatabase([[{ id: 17 }], [{ id: 3 }], [receipt], [product], [receipt], []]);
   await withApi(db, async (request) => {
     const created = await request('/api/transactions/receiving', {
-      productId: 17, receivingDate: '2026-10-17', quantity: 5, makReleaseNumber: ' RN-001 ', materialLotNumber: ' MAT-001 ',
+      productId: 17, receivingDate: '2026-10-17', quantity: 5, location: ' A2C ', makReleaseNumber: ' RN-001 ', materialLotNumber: ' MAT-001 ',
+
     });
     assert.equal(created.status, 201);
+    assert.equal(created.body.location, 'A2C');
+    assert.equal(db.calls[1].parameters.location[1], 'A2C');
     assert.equal(db.calls[1].parameters.makReleaseNumber[1], 'RN-001');
     assert.equal(db.calls[1].parameters.materialLotNumber[1], 'MAT-001');
-    assert.match(db.calls[1].statement, /@materialLotNumber, @makReleaseNumber/);
+    assert.match(db.calls[1].statement, /@location, @materialLotNumber, @makReleaseNumber/);
     const recent = await request('/api/transactions/receiving');
     assert.deepEqual(recent.body, [receipt]);
-    assert.match(db.calls[2].statement, /t\.mak_release_number AS makReleaseNumber/);
+    assert.match(db.calls[2].statement, /t\.location, t\.mak_release_number AS makReleaseNumber/);
     const history = await request('/api/products/17/history');
     assert.deepEqual(history.body.receiving, [receipt]);
+    assert.match(db.calls[4].statement, /SELECT id, CONVERT\(char\(10\), receiving_date, 23\) AS \[date\], location/);
     assert.match(db.calls[4].statement, /mak_release_number AS makReleaseNumber/);
   });
 });
@@ -474,7 +499,7 @@ test('receiving persists independent MAK Release Number and material lot values 
 test('cached receiving forms keep their release reference without returning the old API field', async () => {
   const db = mockDatabase([[{ id: 17 }], [{ id: 3 }], [{ id: 17 }], [{ id: 4 }]]);
   await withApi(db, async (request) => {
-    const values = { productId: 17, receivingDate: '2026-10-17', quantity: 5, makRnNumber: ' RN-CACHED ' };
+    const values = { productId: 17, receivingDate: '2026-10-17', quantity: 5, location: 'A2A', makRnNumber: ' RN-CACHED ' };
     const cached = await request('/api/transactions/receiving', values);
     assert.equal(cached.status, 201);
     assert.equal(cached.body.makReleaseNumber, 'RN-CACHED');
@@ -492,7 +517,9 @@ test('cached receiving forms keep their release reference without returning the 
 test('invalid transactions are rejected before reaching the database', async () => {
   const db = mockDatabase();
   await withApi(db, async (request) => {
-    const values = { productId: 17, receivingDate: '2026-10-17', quantity: 3 };
+    const values = { productId: 17, receivingDate: '2026-10-17', quantity: 3, location: 'A2A' };
+    assert.equal((await request('/api/transactions/receiving', { ...values, location: '' })).status, 400);
+    assert.equal((await request('/api/transactions/receiving', { ...values, location: 'A'.repeat(51) })).status, 400);
     assert.equal((await request('/api/transactions/receiving', { ...values, receivingDate: '2026-02-30' })).status, 400);
     assert.equal((await request('/api/transactions/receiving', { ...values, quantity: 0 })).status, 400);
     assert.equal((await request('/api/transactions/receiving', { ...values, materialLotNumber: {} })).status, 400);
@@ -508,7 +535,7 @@ test('type history export groups all product ledgers by ID using four type-scope
   const first = { ...product, id: 17, productTypeId: 7, productType: type.name };
   const second = { ...first, id: 18 };
   const empty = { ...first, id: 19 };
-  const receipt = { id: 1, productId: 17, date: '2026-10-17', quantity: 10, makReleaseNumber: '000REL' };
+  const receipt = { id: 1, productId: 17, date: '2026-10-17', quantity: 10, location: 'A2A', makReleaseNumber: '000REL' };
   const otherReceipt = { ...receipt, id: 2, productId: 18, quantity: 25 };
   const usage = { id: 3, productId: 17, date: '2026-10-18', quantity: 4, makLotNumber: 'M123' };
   const db = mockDatabase([[type], [first, second, empty], [receipt, otherReceipt], [usage]]);
@@ -523,7 +550,7 @@ test('type history export groups all product ledgers by ID using four type-scope
     assert.equal(db.calls.length, 4);
     for (const call of db.calls) assert.equal(call.parameters.typeId[1], 7);
     for (const call of db.calls.slice(1)) assert.match(call.statement, /WHERE p\.product_type_id = @typeId/);
-    assert.match(db.calls[2].statement, /mak_release_number AS makReleaseNumber/);
+    assert.match(db.calls[2].statement, /t\.location, t\.material_lot_number AS materialLotNumber, t\.mak_release_number AS makReleaseNumber/);
     assert.match(db.calls[3].statement, /mak_lot_number AS makLotNumber/);
     assert.ok(db.calls.every((call) => !/\b(INSERT|UPDATE|DELETE|ALTER|DROP)\b/.test(call.statement)));
   });

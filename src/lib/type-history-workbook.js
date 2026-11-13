@@ -2,9 +2,9 @@ import { createWorkbook, downloadWorkbook, worksheetName } from './excel.js';
 import { productHistoryEntries } from './product-history-report.js';
 import { sortProducts } from './product-sort.js';
 
-const headers = ['Date', 'Material Lot Number', 'MAK Release Number', 'Item/Description', 'Qty', 'Used Qty', 'Used Against(MAK Lot No)'];
-const widths = [15, 28, 28, 60, 20, 20, 36];
-const textColumns = [2, 3, 4, 7];
+const headers = ['Date', 'Material Lot Number', 'Location', 'MAK Release Number', 'Item/Description', 'Qty', 'Used Qty', 'Used Against(MAK Lot No)'];
+const widths = [15, 28, 18, 28, 60, 20, 20, 36];
+const textColumns = [2, 3, 4, 5, 8];
 const text = (value) => String(value ?? '');
 const trimmed = (value) => text(value).trim();
 
@@ -27,7 +27,7 @@ function addSheet(workbook, name, usedNames, type, product) {
     cell.font = { name: 'Calibri', size: 12, bold: true };
     cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
   });
-  sheet.getCell('D1').note = [
+  sheet.getCell('E1').note = [
     `Type: ${text(type.name)}`,
     `Type ID: ${text(type.id)}`,
     ...(product ? [
@@ -40,7 +40,7 @@ function addSheet(workbook, name, usedNames, type, product) {
     ] : []),
   ].join('\n');
   if (product?.unit != null) {
-    for (const column of ['E1', 'F1']) sheet.getCell(column).note = `Unit: ${text(product.unit)}`;
+    for (const column of ['F1', 'G1']) sheet.getCell(column).note = `Unit: ${text(product.unit)}`;
   }
   return sheet;
 }
@@ -74,27 +74,27 @@ export async function createTypeHistoryWorkbook(report) {
     for (const entry of entries) {
       balance += (entry.receivedQuantity ?? 0) - (entry.usedQuantity ?? 0);
       if (!Number.isFinite(balance)) throw new Error('History closing balance must be a finite number.');
-      const row = sheet.addRow([entry.date, entry.materialLotNumber, entry.releaseNumber, entry.description, entry.receivedQuantity, entry.usedQuantity, entry.usedAgainst]);
+      const row = sheet.addRow([entry.date, entry.materialLotNumber, entry.location, entry.releaseNumber, entry.description, entry.receivedQuantity, entry.usedQuantity, entry.usedAgainst]);
       row.font = { name: 'Calibri', size: 12, bold: entry.receiving };
       row.height = Math.max(20, ...textColumns.map((column) => {
         const lines = String(row.getCell(column).value ?? '').split(/\r?\n/);
         return 18 * lines.reduce((count, line) => count + Math.max(1, Math.ceil(line.length / (widths[column - 1] * 0.8))), 0) + 2;
       }));
       row.getCell(1).alignment = { horizontal: 'left', vertical: 'middle' };
-      for (const column of [5, 6]) row.getCell(column).numFmt = quantityFormat(row.getCell(column).value);
+      for (const column of [6, 7]) row.getCell(column).numFmt = quantityFormat(row.getCell(column).value);
       if (!entry.receiving) {
         for (const column of [6, 7]) row.getCell(column).font = { name: 'Calibri', size: 12, color: { argb: 'FFFF0000' } };
       }
-      if (entry.notes) row.getCell(entry.receiving ? 3 : 7).note = entry.notes;
+      if (entry.notes) row.getCell(entry.receiving ? 4 : 8).note = entry.notes;
     }
-    const closing = sheet.addRow([null, null, null, 'Closing Balance', balance === 0 ? 0 : balance, null, null]);
+    const closing = sheet.addRow([null, null, null, null, 'Closing Balance', balance === 0 ? 0 : balance, null, null]);
     closing.height = 24;
     for (let column = 1; column <= headers.length; column++) {
       const cell = closing.getCell(column);
       cell.font = { name: 'Calibri', size: 12, bold: true, color: { argb: 'FF008000' } };
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2F0D9' } };
     }
-    closing.getCell(5).numFmt = quantityFormat(balance, trimmed(product.unit), true);
+    closing.getCell(6).numFmt = quantityFormat(balance, trimmed(product.unit), true);
   }
   return workbook;
 }

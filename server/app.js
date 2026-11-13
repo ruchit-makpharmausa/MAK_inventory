@@ -67,10 +67,12 @@ function transactionError(body, kind) {
       || new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date) return 'Enter a valid transaction date.';
   if (typeof body.quantity !== 'number' || !Number.isFinite(body.quantity) || body.quantity <= 0) return 'Quantity must be greater than zero.';
   if (kind === 'usage' && !requiredText(body.makLotNumber)) return 'MAK lot number is required.';
+  if (kind === 'receiving' && !requiredText(body.location)) return 'Location is required for receiving.';
   if (!optionalText(body.materialLotNumber) || !optionalText(body.remarks)) return 'Material lot number and remarks must be text.';
   if (kind === 'receiving' && !optionalText(body.makReleaseNumber)) return 'MAK Release Number must be text.';
   if (tooLong(body.materialLotNumber, 255) || tooLong(body.makLotNumber, 255)) return 'Lot numbers must be 255 characters or fewer.';
-  if (kind === 'receiving' && tooLong(body.makReleaseNumber, 255)) return 'MAK Release Number must be 255 characters or fewer.';
+  if (kind === 'receiving' && tooLong(body.location, 50)) return 'Location must be 50 characters or fewer.';
+  if (kind === 'receiving' && tooLong(body.makReleaseNumber, 255)) return 'MAK Release Number must be 255 characters or fewer.'
   return null;
 }
 function transactionInputs(body, kind) {
@@ -80,7 +82,7 @@ function transactionInputs(body, kind) {
     quantity: [sql.Float, body.quantity], materialLotNumber: [sql.NVarChar(255), body.materialLotNumber?.trim() || null],
     remarks: [sql.NVarChar(sql.MAX), body.remarks?.trim() || null],
     ...(kind === 'usage' ? { makLotNumber: [sql.NVarChar(255), body.makLotNumber.trim()] }
-      : { makReleaseNumber: [sql.NVarChar(255), body.makReleaseNumber?.trim() || null] }),
+      : { location: [sql.NVarChar(50), body.location.trim()], makReleaseNumber: [sql.NVarChar(255), body.makReleaseNumber?.trim() || null] }),
   };
 }
 
@@ -152,7 +154,7 @@ export function createApp(db = database, {
     if (!products.recordset.length) return res.json({ type, histories: [] });
     const receiving = await db.query(`
       SELECT t.id, t.product_id AS productId, CONVERT(char(10), t.receiving_date, 23) AS [date], t.quantity,
-             t.material_lot_number AS materialLotNumber, t.mak_release_number AS makReleaseNumber, t.remarks
+             t.location, t.material_lot_number AS materialLotNumber, t.mak_release_number AS makReleaseNumber, t.remarks
       FROM dbo.receiving_transactions t JOIN dbo.products p ON p.id = t.product_id
       WHERE p.product_type_id = @typeId AND p.company_id = @companyId ORDER BY t.receiving_date, t.id
     `, inputs);
@@ -225,7 +227,7 @@ export function createApp(db = database, {
     const result = await db.query(`
       SELECT t.id, t.product_id AS productId, CONVERT(char(10), t.${dateColumn}, 23) AS [date],
              t.quantity, t.material_lot_number AS materialLotNumber,
-             ${kind === 'usage' ? 't.mak_lot_number AS makLotNumber,' : 't.mak_release_number AS makReleaseNumber,'}
+             ${kind === 'usage' ? 't.mak_lot_number AS makLotNumber,' : 't.location, t.mak_release_number AS makReleaseNumber,'}
              t.remarks, p.name AS productName, p.item_code AS itemCode, pt.name AS productType, p.unit
       FROM dbo.${table} t JOIN dbo.products p ON p.id = t.product_id
       JOIN dbo.product_types pt ON pt.id = p.product_type_id AND pt.company_id = p.company_id
@@ -243,14 +245,14 @@ export function createApp(db = database, {
     const result = await db.transaction(async (executor) => {
       if (!await lockProduct(body.productId, req.company.id, executor)) return { status: 404, error: 'Product not found.' };
       const inserted = await db.query(`
-        INSERT INTO dbo.receiving_transactions (product_id, receiving_date, quantity, material_lot_number, mak_release_number, remarks, added_by_user_id, created_at)
-        VALUES (@productId, @date, @quantity, @materialLotNumber, @makReleaseNumber, @remarks, @addedByUserId, SYSUTCDATETIME());
+        INSERT INTO dbo.receiving_transactions (product_id, receiving_date, quantity, location, material_lot_number, mak_release_number, remarks, added_by_user_id, created_at)
+        VALUES (@productId, @date, @quantity, @location, @materialLotNumber, @makReleaseNumber, @remarks, @addedByUserId, SYSUTCDATETIME());
         SELECT CAST(SCOPE_IDENTITY() AS int) AS id;
       `, { ...transactionInputs(body, 'receiving'), addedByUserId: [sql.Int, req.user.id] }, executor);
       return { id: inserted.recordset[0].id };
     });
     if (result.error) return fail(res, result.status, result.error);
-    res.status(201).json({ ...body, makReleaseNumber: body.makReleaseNumber?.trim() || null, id: result.id });
+    res.status(201).json({ ...body, location: body.location.trim(), makReleaseNumber: body.makReleaseNumber?.trim() || null, id: result.id });
   }));
   app.post('/api/transactions/usage', route(async (req, res) => {
     const errorMessage = transactionError(req.body, 'usage');
@@ -347,7 +349,7 @@ export function createApp(db = database, {
       const inputs = transactionInputs(body, kind);
       await db.query(`
         UPDATE dbo.${table} SET ${dateColumn} = @date, quantity = @quantity,
-          material_lot_number = @materialLotNumber,
+          material_lot_number = @materialLotNumber, ${kind === 'receiving' ? 'location = @location,' : ''}
           ${kind === 'usage' ? 'mak_lot_number = @makLotNumber' : 'mak_release_number = @makReleaseNumber'},
           remarks = @remarks
         WHERE id = @id AND product_id = @productId
@@ -368,8 +370,8 @@ export function createApp(db = database, {
     if (!product) return fail(res, 404, 'Product not found.');
     const inputs = { productId: [sql.Int, Number(req.params.id)] };
     const receiving = await db.query(`
-      SELECT id, CONVERT(char(10), receiving_date, 23) AS [date], material_lot_number AS materialLotNumber,
-             mak_release_number AS makReleaseNumber, quantity, remarks
+      SELECT id, CONVERT(char(10), receiving_date, 23) AS [date], location,
+             material_lot_number AS materialLotNumber, mak_release_number AS makReleaseNumber, quantity, remarks
       FROM dbo.receiving_transactions WHERE product_id = @productId ORDER BY receiving_date DESC, id DESC
     `, inputs);
     const usage = await db.query(`
