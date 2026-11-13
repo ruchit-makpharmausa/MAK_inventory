@@ -131,9 +131,11 @@ test('summary uses one SQL union-all aggregate with binary normalized product/lo
   assert.equal(call.parameters.companyId[1], 7);
   const { statement } = call;
   assert.equal(statement.split(normalizedLot).length - 1, 2);
-  assert.equal((statement.match(/UNION ALL/g) || []).length, 1);
+  assert.equal((statement.match(/UNION ALL/g) || []).length, 3);
   assert.match(statement, /t\.quantity AS received, CAST\(0 AS float\) AS used\s+FROM dbo\.receiving_transactions t JOIN dbo\.products rp/);
   assert.match(statement, /CAST\(0 AS float\) AS received, t\.quantity AS used\s+FROM dbo\.usage_transactions t JOIN dbo\.products up/);
+  assert.match(statement, /t\.source_product_id AS productId/);
+  assert.match(statement, /t\.destination_product_id AS productId, CAST\(NULL AS NVARCHAR\(255\)\)/);
   assert.match(statement, /GROUP BY productId, materialLotNumber COLLATE Latin1_General_100_BIN2/);
   assert.match(statement, /SUM\(received\) AS totalReceived, SUM\(used\) AS totalUsed/);
   assert.match(statement, /b\.totalReceived - b\.totalUsed AS availableBalance/);

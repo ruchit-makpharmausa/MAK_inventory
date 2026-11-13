@@ -94,6 +94,12 @@ After sign-in, users choose an active company; **Change company** returns to the
 
 Before deploying, stop the app, back up the database, and run [scripts/company-workspaces.sql](./scripts/company-workspaces.sql) as a database administrator. The migration creates the Quten company with code **TRV**, assigns all current product types and products to Quten (their existing transactions stay connected through their product), adds company ownership constraints, and adds the per-session company selection. No product names, codes, quantities, or transactions are rewritten. Then deploy and restart the app. `npm run check:db` verifies the new schema but does not apply migrations.
 
+### Inventory transfers
+
+From a selected product in **Inventory History**, choose **Transfer** to move stock to another product in the same company. Select any source lot with remaining inventory, including **Unassigned (N/A)**, choose a destination product, enter its MAK lot number, date, and quantity. Source and destination products must use compatible units, and the chosen source lot and total source balance are both checked under product locks. The destination product balance increases; its customer Material Lot remains unassigned, while the destination MAK lot code is recorded. Transfers are kept as separate immutable audit entries with source, destination, lot codes, date, quantity, and creator. They update stock totals, lot inventory, and history exports.
+
+Before deploying transfer support, stop the app, back up the database, and run [scripts/inventory-transfers.sql](./scripts/inventory-transfers.sql) as a database administrator after the company and login schema migrations. Grant the app SQL login SELECT and INSERT on `dbo.inventory_transfers`. The migration does not alter existing stock; the app does not automatically apply schema changes.
+
 For a new installation, create the first **administrator** account from PowerShell in the app folder. Run the commands one line at a time; the password must be at least 6 characters. Existing installations must complete the admin upgrade below before starting the updated app.
 
 ```powershell
@@ -254,12 +260,13 @@ The app checks for these existing tables in schema `dbo`:
 
 - `companies`: `id`, `name`, `code`, `is_active`, `created_at`
 - `user_sessions`: `token_hash`, `user_id`, `current_company_id`, `expires_at`, `created_at`
+- `inventory_transfers`: `id`, `company_id`, `source_product_id`, `destination_product_id`, `source_material_lot_number`, `destination_mak_lot_number`, `transfer_date`, `quantity`, `added_by_user_id`, `created_at`
 - `product_types`: `id`, `name`, `company_id`, `created_at`
 - `products`: `id`, `product_type_id`, `company_id`, `name`, `item_code`, `mak_item_code`, `unit`, `comment`, `created_at`, `updated_at`
 - `receiving_transactions`: `id`, `product_id`, `receiving_date`, `quantity`, `location`, `material_lot_number`, `mak_release_number`, `remarks`, `added_by_user_id`, `created_at`
 - `usage_transactions`: `id`, `product_id`, `usage_date`, `quantity`, `material_lot_number`, `mak_lot_number`, `remarks`, `added_by_user_id`, `created_at`
 
-IDs are expected to be integer identity columns. Nonblank MAK Item Codes must be unique within each company’s product type, while Item Codes may be reused; product type names are unique within each company. The login needs SELECT, INSERT, and UPDATE permissions on the company, product-type, and product tables; SELECT, INSERT, UPDATE, and DELETE on user sessions; and the existing inventory transaction permissions. It also needs visibility of the required column metadata. The app does not need permission to create database objects.
+IDs are expected to be integer identity columns. Nonblank MAK Item Codes must be unique within each company’s product type, while Item Codes may be reused; product type names are unique within each company. The login needs SELECT, INSERT, and UPDATE permissions on the company, product-type, and product tables; SELECT, INSERT, UPDATE, and DELETE on user sessions; SELECT and INSERT on `inventory_transfers`; and the existing inventory transaction permissions. It also needs visibility of the required column metadata. The app does not need permission to create database objects.
 
 A connection failure or missing column returns an explicit error; the app never switches to a local database. Previous SQLite files and backups remain untouched and are not used by the app.
 

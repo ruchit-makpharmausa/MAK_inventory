@@ -69,6 +69,26 @@ test('selected-product export includes receiving location in its ledger', async 
   assert.equal(JSON.stringify(history), original);
 });
 
+test('product history exports transfer-in and transfer-out quantities as explicit balance movements', async () => {
+  const history = {
+    product,
+    receiving: [], usage: [],
+    transfers: [
+      { id: 8, direction: 'in', date: '2026-10-12', quantity: 4, sourceProductName: 'Source item', sourceItemCode: 'SRC', destinationMakLotNumber: 'TRV-LOT-8', addedBy: 'Admin' },
+      { id: 9, direction: 'out', date: '2026-10-13', quantity: 2, sourceMaterialLotNumber: 'SRC-LOT', destinationProductName: 'Target item', destinationItemCode: 'DST', destinationMakLotNumber: 'TRV-LOT-9', addedBy: 'Admin' },
+    ],
+  };
+  const workbook = await roundTrip(history);
+  const sheet = workbook.worksheets[0];
+  assert.equal(sheet.getCell('D2').value, 'Transfer in from Source item · MAK lot TRV-LOT-8');
+  assert.equal(sheet.getCell('E2').value, 4);
+  assert.equal(sheet.getCell('D3').value, 'Transfer out to Target item · MAK lot TRV-LOT-9');
+  assert.equal(sheet.getCell('F3').value, 2);
+  assert.equal(sheet.getCell('G3').value, '#TRV-LOT-9');
+  assert.match(noteText(sheet.getCell('D2')), /Inventory transfer #8/);
+  assert.match(noteText(sheet.getCell('G3')), /Inventory transfer #9/);
+});
+
 test('same-day transactions are stable, quantities stay numeric, and lot prefixes are not duplicated', async () => {
   const day = '2026-10-12';
   const workbook = await roundTrip({

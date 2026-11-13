@@ -3,6 +3,8 @@ import { useSearchParams } from 'react-router-dom';
 import PageHeading from '../../components/PageHeading.jsx';
 import HistoryTable from '../../components/HistoryTable.jsx';
 import TransactionDialog from '../../components/TransactionDialog.jsx';
+import TransferDialog from '../../components/TransferDialog.jsx';
+import TransferHistoryTable from '../../components/TransferHistoryTable.jsx';
 import { quantity } from '../../lib/format.js';
 import { sortProducts } from '../../lib/product-sort.js';
 import { exportProductHistoryWorkbook } from '../../lib/product-history-workbook.js';
@@ -22,12 +24,14 @@ export default function InventoryHistoryPage({ products, types = [], onSaved, us
   const [error, setError] = useState('');
   const [exporting, setExporting] = useState(null);
   const [transaction, setTransaction] = useState(null);
+  const [transferOpen, setTransferOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [success, setSuccess] = useState('');
   const [refreshWarning, setRefreshWarning] = useState('');
 
   useEffect(() => {
     setTransaction(null);
+    setTransferOpen(false);
     setSuccess('');
     setRefreshWarning('');
   }, [selectedProductId]);
@@ -46,9 +50,10 @@ export default function InventoryHistoryPage({ products, types = [], onSaved, us
     return () => { active = false; };
   }, [selectedProductId, refreshKey]);
 
-  const onTransactionSaved = async (kind, edited = false) => {
+  const refreshHistory = async (kind, message) => {
     setTransaction(null);
-    setSuccess(`${kind === 'receiving' ? 'Receiving' : 'Usage'} transaction ${edited ? 'updated' : 'saved'}.`);
+    setTransferOpen(false);
+    setSuccess(message);
     setRefreshWarning('');
     setHistory(null);
     setLoading(true);
@@ -56,9 +61,12 @@ export default function InventoryHistoryPage({ products, types = [], onSaved, us
     try {
       await onSaved?.(kind);
     } catch {
-      setRefreshWarning('Transaction saved, but the product catalog could not be refreshed. Refresh the page; do not save the transaction again.');
+      setRefreshWarning('Saved successfully, but the product catalog could not be refreshed. Refresh the page; do not repeat the operation.');
     }
   };
+  const onTransactionSaved = (kind, edited = false) => refreshHistory(kind,
+    `${kind === 'receiving' ? 'Receiving' : 'Usage'} transaction ${edited ? 'updated' : 'saved'}.`);
+  const onTransferSaved = () => refreshHistory('transfer', 'Inventory transfer saved.');
 
   const onSelect = (id) => {
     const next = new URLSearchParams(params);
@@ -118,6 +126,7 @@ export default function InventoryHistoryPage({ products, types = [], onSaved, us
       {selectedProductId && selectedProduct && <div className="heading-actions">
         <button type="button" className="button primary" onClick={() => setTransaction({ kind: 'receiving', productId: selectedProductId })}>Receiving</button>
         <button type="button" className="button secondary" onClick={() => setTransaction({ kind: 'usage', productId: selectedProductId })}>Usage</button>
+        <button type="button" className="button secondary" onClick={() => setTransferOpen(true)}>Transfer</button>
       </div>}
     </section>
     {success && <div className="notice success" role="status">{success}</div>}
@@ -127,6 +136,8 @@ export default function InventoryHistoryPage({ products, types = [], onSaved, us
       key={`${transaction.kind}-${selectedProductId}-${transaction.row?.id || 'new'}`} kind={transaction.kind}
       product={history?.product && String(history.product.id) === selectedProductId ? history.product : selectedProduct}
       transaction={transaction.row} onClose={() => setTransaction(null)} onSaved={onTransactionSaved} />}
+    {transferOpen && selectedProduct && <TransferDialog key={selectedProductId} sourceProduct={selectedProduct}
+      products={products} onClose={() => setTransferOpen(false)} onSaved={onTransferSaved} />}
     {loading ? <div className="panel empty-state" role="status">Loading inventory history…</div>
       : !history ? <div className="panel empty-state"><div className="empty-icon">◷</div>
       <strong>Select a product to view its history</strong><span>Receiving and usage records will appear here.</span></div>
@@ -138,6 +149,7 @@ export default function InventoryHistoryPage({ products, types = [], onSaved, us
           rows={history.receiving} receiving isAdmin={user?.isAdmin} onEdit={(row) => setTransaction({ kind: 'receiving', productId: selectedProductId, row })} />
         <HistoryTable title="Usage history" subtitle="Materials used in production"
           rows={history.usage} isAdmin={user?.isAdmin} onEdit={(row) => setTransaction({ kind: 'usage', productId: selectedProductId, row })} />
+        <TransferHistoryTable rows={history.transfers || []} />
       </>}
   </>;
 }

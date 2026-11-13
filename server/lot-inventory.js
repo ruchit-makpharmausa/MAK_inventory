@@ -14,6 +14,15 @@ const inventorySelect = `
            CAST(0 AS float) AS received, t.quantity AS used
     FROM dbo.usage_transactions t JOIN dbo.products up ON up.id = t.product_id
     WHERE up.company_id = @companyId
+    UNION ALL
+    SELECT t.source_product_id AS productId,
+           NULLIF(TRIM(@lotWhitespace COLLATE Latin1_General_100_BIN2 FROM t.source_material_lot_number COLLATE Latin1_General_100_BIN2) COLLATE Latin1_General_100_BIN2, N'' COLLATE Latin1_General_100_BIN2),
+           CAST(0 AS float), t.quantity
+    FROM dbo.inventory_transfers t WHERE t.company_id = @companyId
+    UNION ALL
+    SELECT t.destination_product_id AS productId, CAST(NULL AS NVARCHAR(255)),
+           t.quantity, CAST(0 AS float)
+    FROM dbo.inventory_transfers t WHERE t.company_id = @companyId
   ), buckets AS (
     SELECT productId, materialLotNumber COLLATE Latin1_General_100_BIN2 AS materialLotNumber,
            SUM(received) AS totalReceived, SUM(used) AS totalUsed

@@ -227,7 +227,7 @@ test('identical names and codes in different types keep their histories scoped t
   const other = { ...product, id: 18, productTypeId: 2, productType: 'Bulk' };
   const receipt = { id: 1, quantity: 10, location: 'A2A' };
   const otherReceipt = { id: 2, quantity: 25, location: 'A2B' };
-  const db = mockDatabase([[product], [receipt], [], [other], [otherReceipt], []]);
+  const db = mockDatabase([[product], [receipt], [], [] , [other], [otherReceipt], [], []]);
   await withApi(db, async (request) => {
     for (const [row, expectedReceipt] of [[product, receipt], [other, otherReceipt]]) {
       const result = await request(`/api/products/${row.id}/history`);
@@ -235,12 +235,15 @@ test('identical names and codes in different types keep their histories scoped t
       assert.equal(result.body.product.id, row.id);
       assert.deepEqual(result.body.receiving, [expectedReceipt]);
       assert.deepEqual(result.body.usage, []);
-      const calls = db.calls.slice(-3);
+      assert.deepEqual(result.body.transfers, []);
+      const calls = db.calls.slice(-4);
       assert.equal(calls[0].parameters.id[1], row.id);
-      for (const call of calls.slice(1)) {
+      for (const call of calls.slice(1, 3)) {
         assert.match(call.statement, /WHERE product_id = @productId/);
         assert.equal(call.parameters.productId[1], row.id);
       }
+      assert.match(calls[3].statement, /source_product_id = @productId OR t\.destination_product_id = @productId/);
+      assert.equal(calls[3].parameters.productId[1], row.id);
     }
   });
 });
@@ -264,15 +267,13 @@ test('material lot availability is product-scoped and keeps case-distinct lot id
       assert.equal(query.executor, undefined);
       assert.equal(query.parameters.lotWhitespace[1].trim(), '');
       assert.equal(query.parameters.lotWhitespace[1].length, 25);
-      assert.equal((query.statement.match(/SUM\(quantity\) AS quantity/g) || []).length, 2);
-      assert.equal((query.statement.match(/WHERE product_id = @productId AND material_lot_number IS NOT NULL/g) || []).length, 2);
-      assert.equal((query.statement.match(/GROUP BY TRIM\(@lotWhitespace FROM material_lot_number\) COLLATE Latin1_General_100_BIN2/g) || []).length, 2);
-      assert.equal((query.statement.match(/TRIM\(@lotWhitespace FROM material_lot_number\) COLLATE Latin1_General_100_BIN2 AS materialLotNumber/g) || []).length, 2);
-      assert.match(query.statement, /FROM received r LEFT JOIN used u ON u\.materialLotNumber = r\.materialLotNumber/);
-      assert.match(query.statement, /WHERE r\.materialLotNumber <> N'' AND r\.quantity - COALESCE\(u\.quantity, 0\) > 0/);
+      assert.match(query.statement, /FROM dbo\.usage_transactions/);
+      assert.match(query.statement, /FROM dbo\.inventory_transfers/);
+      assert.match(query.statement, /source_product_id = @productId/);
       assert.match(query.statement, /r\.quantity - COALESCE\(u\.quantity, 0\) AS availableQuantity/);
-      assert.match(query.statement, /ORDER BY r\.materialLotNumber/);
-      assert.doesNotMatch(query.statement, /FULL JOIN|RIGHT JOIN|UNION|product_type_id|item_code|INSERT|UPDATE|DELETE/i);
+      assert.match(query.statement, /r\.quantity - COALESCE\(u\.quantity, 0\) > 0/);
+      assert.match(query.statement, /UNION ALL/);
+      assert.doesNotMatch(query.statement, /product_type_id|item_code|INSERT|UPDATE|DELETE/i);
     }
     assert.equal(db.calls[1].statement, db.calls[3].statement);
   });
@@ -474,7 +475,7 @@ test('receiving and usage reject missing products under the lock without checkin
 
 test('receiving persists independent MAK Release Number and material lot values and returns them in reads', async () => {
   const receipt = { id: 3, location: 'A2C', makReleaseNumber: 'RN-001', materialLotNumber: 'MAT-001' };
-  const db = mockDatabase([[{ id: 17 }], [{ id: 3 }], [receipt], [product], [receipt], []]);
+  const db = mockDatabase([[{ id: 17 }], [{ id: 3 }], [receipt], [product], [receipt], [], []]);
   await withApi(db, async (request) => {
     const created = await request('/api/transactions/receiving', {
       productId: 17, receivingDate: '2026-10-17', quantity: 5, location: ' A2C ', makReleaseNumber: ' RN-001 ', materialLotNumber: ' MAT-001 ',
@@ -538,20 +539,24 @@ test('type history export groups all product ledgers by ID using four type-scope
   const receipt = { id: 1, productId: 17, date: '2026-10-17', quantity: 10, location: 'A2A', makReleaseNumber: '000REL' };
   const otherReceipt = { ...receipt, id: 2, productId: 18, quantity: 25 };
   const usage = { id: 3, productId: 17, date: '2026-10-18', quantity: 4, makLotNumber: 'M123' };
-  const db = mockDatabase([[type], [first, second, empty], [receipt, otherReceipt], [usage]]);
+  const transfer = { id: 9, date: '2026-10-19', quantity: 3, sourceMaterialLotNumber: null, destinationMakLotNumber: 'TRV-LOT-9',
+    sourceProductId: 17, sourceProductName: first.name, sourceItemCode: first.itemCode, sourceMakItemCode: first.makItemCode,
+    destinationProductId: 18, destinationProductName: second.name, destinationItemCode: second.itemCode, destinationMakItemCode: second.makItemCode, addedBy: 'Test User' };
+  const db = mockDatabase([[type], [first, second, empty], [receipt, otherReceipt], [usage], [transfer]]);
   await withApi(db, async (request) => {
     const result = await request('/api/product-types/7/history');
     assert.equal(result.status, 200);
     assert.deepEqual(result.body, { type, histories: [
-      { product: first, receiving: [receipt], usage: [usage] },
-      { product: second, receiving: [otherReceipt], usage: [] },
-      { product: empty, receiving: [], usage: [] },
+      { product: first, receiving: [receipt], usage: [usage], transfers: [{ ...transfer, direction: 'out' }] },
+      { product: second, receiving: [otherReceipt], usage: [], transfers: [{ ...transfer, direction: 'in' }] },
+      { product: empty, receiving: [], usage: [], transfers: [] },
     ] });
-    assert.equal(db.calls.length, 4);
+    assert.equal(db.calls.length, 5);
     for (const call of db.calls) assert.equal(call.parameters.typeId[1], 7);
-    for (const call of db.calls.slice(1)) assert.match(call.statement, /WHERE p\.product_type_id = @typeId/);
+    for (const call of db.calls.slice(1, 4)) assert.match(call.statement, /WHERE p\.product_type_id = @typeId/);
     assert.match(db.calls[2].statement, /t\.location, t\.material_lot_number AS materialLotNumber, t\.mak_release_number AS makReleaseNumber/);
     assert.match(db.calls[3].statement, /mak_lot_number AS makLotNumber/);
+    assert.match(db.calls[4].statement, /inventory_transfers/);
     assert.ok(db.calls.every((call) => !/\b(INSERT|UPDATE|DELETE|ALTER|DROP)\b/.test(call.statement)));
   });
 });
@@ -572,12 +577,12 @@ test('type history export supports empty registered types and rejects invalid or
 test('type history query count stays constant for a large product catalog and failures return no partial report', async () => {
   const catalog = Array.from({ length: 200 }, (_, index) => ({ ...product, id: index + 1 }));
   const timeout = Object.assign(new Error('private-query-details'), { name: 'RequestError', code: 'ETIMEOUT' });
-  const db = mockDatabase([[{ id: 1, name: 'Label' }], catalog, [], [], [{ id: 1, name: 'Label' }], catalog, timeout]);
+  const db = mockDatabase([[{ id: 1, name: 'Label' }], catalog, [], [], [], [{ id: 1, name: 'Label' }], catalog, [], [], timeout]);
   await withApi(db, async (request) => {
     const result = await request('/api/product-types/1/history');
     assert.equal(result.status, 200);
     assert.equal(result.body.histories.length, 200);
-    assert.equal(db.calls.length, 4);
+    assert.equal(db.calls.length, 5);
     const failed = await request('/api/product-types/1/history');
     assert.equal(failed.status, 503);
     assert.ok(!Object.hasOwn(failed.body, 'histories'));

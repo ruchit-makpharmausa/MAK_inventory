@@ -12,12 +12,17 @@ import { mountLotInventory } from './lot-inventory.js';
 const productSelect = `
   SELECT p.id, p.product_type_id AS productTypeId, pt.name AS productType,
          p.name, p.item_code AS itemCode, p.mak_item_code AS makItemCode, p.unit, p.comment,
-         COALESCE(r.total_received, 0) AS totalReceived,
-         COALESCE(u.total_used, 0) AS totalUsed,
-         COALESCE(r.total_received, 0) - COALESCE(u.total_used, 0) AS availableBalance
+         COALESCE(r.total_received, 0) + COALESCE(ti.total_transferred, 0) AS totalReceived,
+         COALESCE(u.total_used, 0) + COALESCE(tox.total_transferred, 0) AS totalUsed,
+         COALESCE(r.total_received, 0) + COALESCE(ti.total_transferred, 0)
+           - COALESCE(u.total_used, 0) - COALESCE(tox.total_transferred, 0) AS availableBalance
   FROM dbo.products p JOIN dbo.product_types pt ON pt.id = p.product_type_id AND pt.company_id = p.company_id
   LEFT JOIN (SELECT product_id, SUM(quantity) AS total_received FROM dbo.receiving_transactions GROUP BY product_id) r ON r.product_id = p.id
   LEFT JOIN (SELECT product_id, SUM(quantity) AS total_used FROM dbo.usage_transactions GROUP BY product_id) u ON u.product_id = p.id
+  LEFT JOIN (SELECT destination_product_id AS product_id, SUM(quantity) AS total_transferred
+             FROM dbo.inventory_transfers GROUP BY destination_product_id) ti ON ti.product_id = p.id
+  LEFT JOIN (SELECT source_product_id AS product_id, SUM(quantity) AS total_transferred
+             FROM dbo.inventory_transfers GROUP BY source_product_id) tox ON tox.product_id = p.id
 `;
 // Match String.trim() for older ledger values as well as newly normalized API inputs.
 const lotWhitespace = '\u0009\u000a\u000b\u000c\u000d\u0020\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff';
@@ -29,16 +34,45 @@ const materialLotsSelect = `
     WHERE product_id = @productId AND material_lot_number IS NOT NULL
     GROUP BY TRIM(@lotWhitespace FROM material_lot_number) COLLATE Latin1_General_100_BIN2
   ), used AS (
-    SELECT TRIM(@lotWhitespace FROM material_lot_number) COLLATE Latin1_General_100_BIN2 AS materialLotNumber,
-           SUM(quantity) AS quantity
-    FROM dbo.usage_transactions
-    WHERE product_id = @productId AND material_lot_number IS NOT NULL
-    GROUP BY TRIM(@lotWhitespace FROM material_lot_number) COLLATE Latin1_General_100_BIN2
+    SELECT materialLotNumber, SUM(quantity) AS quantity
+    FROM (
+      SELECT TRIM(@lotWhitespace FROM material_lot_number) COLLATE Latin1_General_100_BIN2 AS materialLotNumber, quantity
+      FROM dbo.usage_transactions
+      WHERE product_id = @productId AND material_lot_number IS NOT NULL
+      UNION ALL
+      SELECT TRIM(@lotWhitespace FROM source_material_lot_number) COLLATE Latin1_General_100_BIN2 AS materialLotNumber, quantity
+      FROM dbo.inventory_transfers
+      WHERE source_product_id = @productId AND source_material_lot_number IS NOT NULL
+    ) usageAndTransfers
+    GROUP BY materialLotNumber
   )
   SELECT r.materialLotNumber, r.quantity - COALESCE(u.quantity, 0) AS availableQuantity
   FROM received r LEFT JOIN used u ON u.materialLotNumber = r.materialLotNumber
   WHERE r.materialLotNumber <> N'' AND r.quantity - COALESCE(u.quantity, 0) > 0
   ORDER BY r.materialLotNumber
+`;
+const transferLotsSelect = `
+  WITH movements AS (
+    SELECT TRIM(@lotWhitespace FROM material_lot_number) COLLATE Latin1_General_100_BIN2 AS materialLotNumber,
+           quantity AS received, CAST(0 AS float) AS used
+    FROM dbo.receiving_transactions WHERE product_id = @productId
+    UNION ALL
+    SELECT CAST(NULL AS NVARCHAR(255)), quantity, CAST(0 AS float)
+    FROM dbo.inventory_transfers WHERE destination_product_id = @productId
+    UNION ALL
+    SELECT TRIM(@lotWhitespace FROM material_lot_number) COLLATE Latin1_General_100_BIN2,
+           CAST(0 AS float), quantity
+    FROM dbo.usage_transactions WHERE product_id = @productId
+    UNION ALL
+    SELECT TRIM(@lotWhitespace FROM source_material_lot_number) COLLATE Latin1_General_100_BIN2,
+           CAST(0 AS float), quantity
+    FROM dbo.inventory_transfers WHERE source_product_id = @productId
+  )
+  SELECT materialLotNumber, SUM(received) - SUM(used) AS availableQuantity
+  FROM movements
+  GROUP BY materialLotNumber COLLATE Latin1_General_100_BIN2
+  HAVING SUM(received) - SUM(used) > 0
+  ORDER BY materialLotNumber COLLATE Latin1_General_100_BIN2
 `;
 const requiredText = (value) => typeof value === 'string' && value.trim().length > 0;
 const optionalText = (value) => value == null || typeof value === 'string';
@@ -108,10 +142,15 @@ export function createApp(db = database, {
     }, executor);
     return result.recordset.length > 0;
   };
+  const lotInputs = (productId) => ({
+    productId: [sql.Int, Number(productId)], lotWhitespace: [sql.NVarChar(25), lotWhitespace],
+  });
   const getMaterialLots = async (productId, executor) => {
-    const result = await db.query(materialLotsSelect, {
-      productId: [sql.Int, Number(productId)], lotWhitespace: [sql.NVarChar(25), lotWhitespace],
-    }, executor);
+    const result = await db.query(materialLotsSelect, lotInputs(productId), executor);
+    return result.recordset;
+  };
+  const getTransferLots = async (productId, executor) => {
+    const result = await db.query(transferLotsSelect, lotInputs(productId), executor);
     return result.recordset;
   };
 
@@ -164,10 +203,27 @@ export function createApp(db = database, {
       FROM dbo.usage_transactions t JOIN dbo.products p ON p.id = t.product_id
       WHERE p.product_type_id = @typeId AND p.company_id = @companyId ORDER BY t.usage_date, t.id
     `, inputs);
-    const histories = products.recordset.map((product) => ({ product, receiving: [], usage: [] }));
+    const transfers = await db.query(`
+      SELECT t.id, CONVERT(char(10), t.transfer_date, 23) AS [date], t.quantity,
+             t.source_material_lot_number AS sourceMaterialLotNumber, t.destination_mak_lot_number AS destinationMakLotNumber,
+             t.source_product_id AS sourceProductId, sp.name AS sourceProductName, sp.item_code AS sourceItemCode, sp.mak_item_code AS sourceMakItemCode,
+             t.destination_product_id AS destinationProductId, dp.name AS destinationProductName, dp.item_code AS destinationItemCode, dp.mak_item_code AS destinationMakItemCode,
+             u.display_name AS addedBy
+      FROM dbo.inventory_transfers t
+      JOIN dbo.products sp ON sp.id = t.source_product_id AND sp.company_id = t.company_id
+      JOIN dbo.products dp ON dp.id = t.destination_product_id AND dp.company_id = t.company_id
+      LEFT JOIN dbo.app_users u ON u.id = t.added_by_user_id
+      WHERE t.company_id = @companyId AND (sp.product_type_id = @typeId OR dp.product_type_id = @typeId)
+      ORDER BY t.transfer_date, t.id
+    `, inputs);
+    const histories = products.recordset.map((product) => ({ product, receiving: [], usage: [], transfers: [] }));
     const byProduct = new Map(histories.map((history) => [String(history.product.id), history]));
     for (const row of receiving.recordset) byProduct.get(String(row.productId))?.receiving.push(row);
     for (const row of usage.recordset) byProduct.get(String(row.productId))?.usage.push(row);
+    for (const row of transfers.recordset) {
+      if (byProduct.has(String(row.sourceProductId))) byProduct.get(String(row.sourceProductId)).transfers.push({ ...row, direction: 'out' });
+      if (byProduct.has(String(row.destinationProductId))) byProduct.get(String(row.destinationProductId)).transfers.push({ ...row, direction: 'in' });
+    }
     res.json({ type, histories });
   }));
   app.get('/api/products', route(async (req, res) => {
@@ -224,6 +280,30 @@ export function createApp(db = database, {
     if (!['receiving', 'usage'].includes(kind)) return fail(res, 404, 'Transaction type not found.');
     const table = kind === 'receiving' ? 'receiving_transactions' : 'usage_transactions';
     const dateColumn = kind === 'receiving' ? 'receiving_date' : 'usage_date';
+    const transferRows = kind === 'receiving' ? `
+      UNION ALL
+      SELECT -tr.id AS id, tr.destination_product_id AS productId,
+             CONVERT(char(10), tr.transfer_date, 23) AS [date], tr.quantity,
+             CAST(NULL AS NVARCHAR(255)) AS materialLotNumber, CAST(NULL AS NVARCHAR(50)) AS location,
+             tr.destination_mak_lot_number AS makReleaseNumber,
+             CONCAT(N'Transfer from ', sp.name, N' (', COALESCE(NULLIF(sp.mak_item_code, N''), sp.item_code), N')') AS remarks,
+             dp.name AS productName, dp.item_code AS itemCode, dpt.name AS productType, dp.unit
+      FROM dbo.inventory_transfers tr JOIN dbo.products dp ON dp.id = tr.destination_product_id
+      JOIN dbo.product_types dpt ON dpt.id = dp.product_type_id AND dpt.company_id = dp.company_id
+      JOIN dbo.products sp ON sp.id = tr.source_product_id
+      WHERE tr.company_id = @companyId
+    ` : `
+      UNION ALL
+      SELECT -tr.id AS id, tr.source_product_id AS productId,
+             CONVERT(char(10), tr.transfer_date, 23) AS [date], tr.quantity,
+             tr.source_material_lot_number AS materialLotNumber, tr.destination_mak_lot_number AS makLotNumber,
+             CONCAT(N'Transfer to ', dp.name, N' (', COALESCE(NULLIF(dp.mak_item_code, N''), dp.item_code), N')') AS remarks,
+             sp.name AS productName, sp.item_code AS itemCode, spt.name AS productType, sp.unit
+      FROM dbo.inventory_transfers tr JOIN dbo.products sp ON sp.id = tr.source_product_id
+      JOIN dbo.product_types spt ON spt.id = sp.product_type_id AND spt.company_id = sp.company_id
+      JOIN dbo.products dp ON dp.id = tr.destination_product_id
+      WHERE tr.company_id = @companyId
+    `;
     const result = await db.query(`
       SELECT t.id, t.product_id AS productId, CONVERT(char(10), t.${dateColumn}, 23) AS [date],
              t.quantity, t.material_lot_number AS materialLotNumber,
@@ -232,7 +312,8 @@ export function createApp(db = database, {
       FROM dbo.${table} t JOIN dbo.products p ON p.id = t.product_id
       JOIN dbo.product_types pt ON pt.id = p.product_type_id AND pt.company_id = p.company_id
       WHERE p.company_id = @companyId
-      ORDER BY t.${dateColumn} DESC, t.id DESC
+      ${transferRows}
+      ORDER BY [date] DESC, id DESC
     `, { companyId: [sql.Int, req.company.id] });
     res.json(result.recordset);
   }));
@@ -364,6 +445,86 @@ export function createApp(db = database, {
     if (!await getProduct(req.params.id, req.company.id)) return fail(res, 404, 'Product not found.');
     res.json(await getMaterialLots(req.params.id));
   }));
+  app.get('/api/products/:id/transfer-lots', route(async (req, res) => {
+    if (!validId(req.params.id)) return fail(res, 404, 'Product not found.');
+    if (!await getProduct(req.params.id, req.company.id)) return fail(res, 404, 'Product not found.');
+    res.json(await getTransferLots(req.params.id));
+  }));
+  app.post('/api/transfers', route(async (req, res) => {
+    const body = req.body || {};
+    if (!validId(body.sourceProductId) || !validId(body.destinationProductId)) return fail(res, 400, 'Select valid source and destination products.');
+    if (Number(body.sourceProductId) === Number(body.destinationProductId)) return fail(res, 400, 'Source and destination products must be different.');
+    if (!requiredText(body.destinationMakLotNumber) || tooLong(body.destinationMakLotNumber, 255)) return fail(res, 400, 'Destination MAK lot number is required and must be 255 characters or fewer.');
+    if (!optionalText(body.sourceMaterialLotNumber) || tooLong(body.sourceMaterialLotNumber, 255)) return fail(res, 400, 'Source material lot must be 255 characters or fewer.');
+    if (!requiredText(body.transferDate) || !/^\d{4}-\d{2}-\d{2}$/.test(body.transferDate)
+        || !Number.isFinite(Date.parse(`${body.transferDate}T00:00:00Z`))
+        || new Date(`${body.transferDate}T00:00:00Z`).toISOString().slice(0, 10) !== body.transferDate) return fail(res, 400, 'Enter a valid transfer date.');
+    if (typeof body.quantity !== 'number' || !Number.isFinite(body.quantity) || body.quantity <= 0) return fail(res, 400, 'Quantity must be greater than zero.');
+
+    const sourceProductId = Number(body.sourceProductId);
+    const destinationProductId = Number(body.destinationProductId);
+    const sourceLot = body.sourceMaterialLotNumber?.trim() || null;
+    const destinationMakLotNumber = body.destinationMakLotNumber.trim();
+    const result = await db.transaction(async (executor) => {
+      for (const productId of [sourceProductId, destinationProductId].sort((a, b) => a - b)) {
+        if (!await lockProduct(productId, req.company.id, executor)) return { status: 404, error: 'Product not found in the selected company.' };
+      }
+      const source = await getProduct(sourceProductId, req.company.id, executor);
+      const destination = await getProduct(destinationProductId, req.company.id, executor);
+      const canonicalUnit = (value) => ['kg', 'kgs'].includes(String(value).trim().toLowerCase()) ? 'kg'
+        : String(value).trim().toLowerCase() === 'pcs' ? 'pcs' : String(value).trim().toLowerCase();
+      if (canonicalUnit(source.unit) !== canonicalUnit(destination.unit)) {
+        return { status: 400, error: 'Source and destination products must use compatible units.' };
+      }
+      if (body.quantity > Number(source.availableBalance)) {
+        return { status: 400, error: `Insufficient source inventory. Available: ${source.availableBalance} ${source.unit}.` };
+      }
+      const lots = await getTransferLots(sourceProductId, executor);
+      const lot = lots.find((item) => (item.materialLotNumber == null ? null : item.materialLotNumber.trim()) === sourceLot);
+      const lotBalance = Number(lot?.availableQuantity || 0);
+      if (body.quantity > lotBalance) {
+        return { status: 400, error: `Insufficient source lot inventory. Available: ${lotBalance} ${source.unit}.` };
+      }
+      const inserted = await db.query(`
+        INSERT INTO dbo.inventory_transfers
+          (company_id, source_product_id, destination_product_id, source_material_lot_number,
+           destination_mak_lot_number, transfer_date, quantity, added_by_user_id)
+        OUTPUT INSERTED.id
+        VALUES (@companyId, @sourceProductId, @destinationProductId, @sourceMaterialLotNumber,
+                @destinationMakLotNumber, @transferDate, @quantity, @addedByUserId)
+      `, {
+        companyId: [sql.Int, req.company.id], sourceProductId: [sql.Int, sourceProductId],
+        destinationProductId: [sql.Int, destinationProductId], sourceMaterialLotNumber: [sql.NVarChar(255), sourceLot],
+        destinationMakLotNumber: [sql.NVarChar(255), destinationMakLotNumber],
+        transferDate: [sql.Date, new Date(`${body.transferDate}T00:00:00Z`)], quantity: [sql.Float, body.quantity],
+        addedByUserId: [sql.Int, req.user.id],
+      }, executor);
+      return { id: inserted.recordset[0].id, sourceProductId, destinationProductId, sourceLot, destinationMakLotNumber };
+    });
+    if (result.error) return fail(res, result.status, result.error);
+    res.status(201).json(result);
+  }));
+  app.get('/api/products/:id/transfers', route(async (req, res) => {
+    if (!validId(req.params.id)) return fail(res, 404, 'Product not found.');
+    const productId = Number(req.params.id);
+    if (!await getProduct(productId, req.company.id)) return fail(res, 404, 'Product not found.');
+    const result = await db.query(`
+      SELECT t.id, CONVERT(char(10), t.transfer_date, 23) AS [date], t.quantity,
+             t.source_material_lot_number AS sourceMaterialLotNumber,
+             t.destination_mak_lot_number AS destinationMakLotNumber,
+             sp.id AS sourceProductId, sp.name AS sourceProductName, sp.item_code AS sourceItemCode, sp.mak_item_code AS sourceMakItemCode,
+             dp.id AS destinationProductId, dp.name AS destinationProductName, dp.item_code AS destinationItemCode, dp.mak_item_code AS destinationMakItemCode,
+             u.display_name AS addedBy,
+             CASE WHEN t.source_product_id = @productId THEN N'out' ELSE N'in' END AS direction
+      FROM dbo.inventory_transfers t
+      JOIN dbo.products sp ON sp.id = t.source_product_id AND sp.company_id = t.company_id
+      JOIN dbo.products dp ON dp.id = t.destination_product_id AND dp.company_id = t.company_id
+      LEFT JOIN dbo.app_users u ON u.id = t.added_by_user_id
+      WHERE t.company_id = @companyId AND (t.source_product_id = @productId OR t.destination_product_id = @productId)
+      ORDER BY t.transfer_date DESC, t.id DESC
+    `, { productId: [sql.Int, productId], companyId: [sql.Int, req.company.id] });
+    res.json(result.recordset);
+  }));
   app.get('/api/products/:id/history', route(async (req, res) => {
     if (!validId(req.params.id)) return fail(res, 404, 'Product not found.');
     const product = await getProduct(req.params.id, req.company.id);
@@ -379,7 +540,21 @@ export function createApp(db = database, {
              mak_lot_number AS makLotNumber, quantity, remarks
       FROM dbo.usage_transactions WHERE product_id = @productId ORDER BY usage_date DESC, id DESC
     `, inputs);
-    res.json({ product, receiving: receiving.recordset, usage: usage.recordset });
+    const transfers = await db.query(`
+      SELECT t.id, CONVERT(char(10), t.transfer_date, 23) AS [date], t.quantity,
+             t.source_material_lot_number AS sourceMaterialLotNumber, t.destination_mak_lot_number AS destinationMakLotNumber,
+             t.source_product_id AS sourceProductId, sp.name AS sourceProductName, sp.item_code AS sourceItemCode, sp.mak_item_code AS sourceMakItemCode,
+             t.destination_product_id AS destinationProductId, dp.name AS destinationProductName, dp.item_code AS destinationItemCode, dp.mak_item_code AS destinationMakItemCode,
+             u.display_name AS addedBy,
+             CASE WHEN t.source_product_id = @productId THEN N'out' ELSE N'in' END AS direction
+      FROM dbo.inventory_transfers t
+      JOIN dbo.products sp ON sp.id = t.source_product_id AND sp.company_id = t.company_id
+      JOIN dbo.products dp ON dp.id = t.destination_product_id AND dp.company_id = t.company_id
+      LEFT JOIN dbo.app_users u ON u.id = t.added_by_user_id
+      WHERE t.company_id = @companyId AND (t.source_product_id = @productId OR t.destination_product_id = @productId)
+      ORDER BY t.transfer_date DESC, t.id DESC
+    `, { ...inputs, companyId: [sql.Int, req.company.id] });
+    res.json({ product, receiving: receiving.recordset, usage: usage.recordset, transfers: transfers.recordset });
   }));
   app.use('/api', (_req, res) => fail(res, 404, 'API endpoint not found.'));
   if (serveClient) {

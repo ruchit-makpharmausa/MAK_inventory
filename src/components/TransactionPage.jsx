@@ -88,8 +88,8 @@ export default function TransactionPage({ kind, products, types = [], onSaved, i
         {!rows.length ? <div className="empty-state compact"><span>No transactions recorded yet.</span></div>
           : <div className="recent-list">{rows.slice(0, 8).map((row) => <div className="recent-row" key={row.id}>
             <div className={`recent-icon ${receiving ? 'green' : 'amber'}`}>{receiving ? '↓' : '↑'}</div>
-            <div className="recent-info"><strong>{row.productName}</strong><span>{row.productType} · {row.itemCode} · {dateLabel(row.date)}</span>
-              {receiving && <span>Location: {row.location || '—'}</span>}</div>
+            <div className="recent-info"><strong>{row.productName}</strong><span>{row.productType} · {row.itemCode} · {dateLabel(row.date)}{Number(row.id) < 0 ? ' · Transfer' : ''}</span>
+              {receiving && Number(row.id) >= 0 && <span>Location: {row.location || '—'}</span>}</div>
             <div className="recent-quantity">{receiving ? '+' : '−'}{quantity(row.quantity)}<small>{row.unit}</small></div>
           </div>)}</div>}
       </section>

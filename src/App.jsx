@@ -133,7 +133,8 @@ function App() {
   }, [location.pathname]);
 
   const onTransactionSaved = async (kind) => {
-    setMessage({ kind: 'success', text: `${kind === 'receiving' ? 'Receiving' : 'Usage'} transaction saved.` });
+    setMessage({ kind: 'success', text: kind === 'transfer' ? 'Inventory transfer saved.'
+      : `${kind === 'receiving' ? 'Receiving' : 'Usage'} transaction saved.` });
     await refresh();
   };
 
