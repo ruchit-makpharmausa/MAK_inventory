@@ -1,10 +1,10 @@
 import { dateLabel, quantity } from '../lib/format.js';
 
-export default function HistoryTable({ title, subtitle, rows, receiving = false, isAdmin = false, onEdit }) {
+export default function HistoryTable({ title, subtitle, rows, receiving = false, isAdmin = false, onEdit, emptyMessage }) {
   return <section className="panel history-panel">
     <div className="panel-heading"><div><h2>{title}</h2><p>{subtitle}</p></div>
       <span className="count-pill">{rows.length} entries</span></div>
-    {!rows.length ? <div className="empty-state compact"><span>No {receiving ? 'receiving' : 'usage'} records for this product.</span></div>
+    {!rows.length ? <div className="empty-state compact"><span>{emptyMessage || `No ${receiving ? 'receiving' : 'usage'} records for this product.`}</span></div>
       : <div className="table-scroll"><table className={`history-table${receiving ? ' receiving-history-table' : ''}`} aria-label={title}>
         <colgroup>
           <col className="history-date-column" />

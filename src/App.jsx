@@ -224,7 +224,7 @@ function App() {
           <Route path="/receiving" element={<ReceivingPage products={allProducts} types={types} onSaved={onTransactionSaved} />} />
           <Route path="/usage" element={<UsagePage products={allProducts} types={types} onSaved={onTransactionSaved} />} />
           <Route path="/inv_history" element={<InventoryHistoryPage products={allProducts} types={types} onSaved={onTransactionSaved} user={user} />} />
-          <Route path="/lot-inventory" element={<LotInventoryPage products={allProducts} types={types} />} />
+          <Route path="/lot-inventory" element={<LotInventoryPage products={allProducts} types={types} user={user} onSaved={onTransactionSaved} />} />
           <Route path="/history" element={<Navigate to={`/inv_history${location.search}${location.hash}`} replace />} />
           <Route path="/admin" element={user?.isAdmin ? <AdminPage api={api} /> : <Navigate to="/dashboard" replace />} />
           <Route path="*" element={<NotFoundPage />} />

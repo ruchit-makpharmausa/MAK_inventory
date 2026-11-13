@@ -9,6 +9,7 @@ import { quantity } from '../../lib/format.js';
 import { sortProducts } from '../../lib/product-sort.js';
 import { exportProductHistoryWorkbook } from '../../lib/product-history-workbook.js';
 import { exportProductHistoryPdf } from '../../lib/product-history-pdf.js';
+import { filterTransactionHistory } from '../../lib/history-search.js';
 import api from '../../lib/api.js';
 
 export default function InventoryHistoryPage({ products, types = [], onSaved, user }) {
@@ -20,6 +21,7 @@ export default function InventoryHistoryPage({ products, types = [], onSaved, us
     ? '' : requestedProductId;
   const matchingProducts = sortProducts(products.filter((product) => !typeFilter || String(product.productTypeId) === typeFilter));
   const [history, setHistory] = useState(null);
+  const [historySearch, setHistorySearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [exporting, setExporting] = useState(null);
@@ -28,10 +30,14 @@ export default function InventoryHistoryPage({ products, types = [], onSaved, us
   const [refreshKey, setRefreshKey] = useState(0);
   const [success, setSuccess] = useState('');
   const [refreshWarning, setRefreshWarning] = useState('');
+  const receivingRows = filterTransactionHistory(history?.receiving || [], historySearch);
+  const usageRows = filterTransactionHistory(history?.usage || [], historySearch);
+  const transferRows = filterTransactionHistory(history?.transfers || [], historySearch);
 
   useEffect(() => {
     setTransaction(null);
     setTransferOpen(false);
+    setHistorySearch('');
     setSuccess('');
     setRefreshWarning('');
   }, [selectedProductId]);
@@ -145,11 +151,18 @@ export default function InventoryHistoryPage({ products, types = [], onSaved, us
         <div className="balance-banner"><div><span>Current available balance</span><strong>
           {quantity(history.product.availableBalance)} <small>{history.product.unit}</small></strong></div>
           <span className="balance-product">{history.product.productType} · {history.product.itemCode} · {history.product.name}</span></div>
+        <label className="history-search">Search this product’s transactions
+          <input type="search" value={historySearch} onChange={(event) => setHistorySearch(event.target.value)}
+            placeholder="Material Lot number, MAK lot, location, or remarks" />
+        </label>
         <HistoryTable title="Receiving history" subtitle="Materials added to inventory"
-          rows={history.receiving} receiving isAdmin={user?.isAdmin} onEdit={(row) => setTransaction({ kind: 'receiving', productId: selectedProductId, row })} />
+          rows={receivingRows} emptyMessage={historySearch.trim() ? 'No receiving transactions match this search.' : undefined}
+          receiving isAdmin={user?.isAdmin} onEdit={(row) => setTransaction({ kind: 'receiving', productId: selectedProductId, row })} />
         <HistoryTable title="Usage history" subtitle="Materials used in production"
-          rows={history.usage} isAdmin={user?.isAdmin} onEdit={(row) => setTransaction({ kind: 'usage', productId: selectedProductId, row })} />
-        <TransferHistoryTable rows={history.transfers || []} />
+          rows={usageRows} emptyMessage={historySearch.trim() ? 'No usage transactions match this search.' : undefined}
+          isAdmin={user?.isAdmin} onEdit={(row) => setTransaction({ kind: 'usage', productId: selectedProductId, row })} />
+        <TransferHistoryTable rows={transferRows}
+          emptyMessage={historySearch.trim() ? 'No transfers match this search.' : undefined} />
       </>}
   </>;
 }

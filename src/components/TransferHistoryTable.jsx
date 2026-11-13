@@ -1,10 +1,10 @@
 import { dateLabel, quantity } from '../lib/format.js';
 
-export default function TransferHistoryTable({ rows = [] }) {
+export default function TransferHistoryTable({ rows = [], emptyMessage }) {
   return <section className="panel history-panel">
     <div className="panel-heading"><div><h2>Transfer history</h2><p>Audited transfers into and out of this product.</p></div>
       <span className="count-pill">{rows.length} entries</span></div>
-    {!rows.length ? <div className="empty-state compact"><span>No transfers recorded for this product.</span></div>
+    {!rows.length ? <div className="empty-state compact"><span>{emptyMessage || 'No transfers recorded for this product.'}</span></div>
       : <div className="table-scroll"><table className="history-table transfer-history-table" aria-label="Transfer history">
         <thead><tr><th scope="col">Date</th><th scope="col">Direction</th><th scope="col">Other product</th>
           <th scope="col">Source customer LOT</th><th scope="col">Destination MAK lot</th>

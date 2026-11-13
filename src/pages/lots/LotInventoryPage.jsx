@@ -2,12 +2,13 @@ import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import PageHeading from '../../components/PageHeading.jsx';
 import HistoryTable from '../../components/HistoryTable.jsx';
+import TransactionDialog from '../../components/TransactionDialog.jsx';
 import api from '../../lib/api.js';
 import { quantity } from '../../lib/format.js';
 import { filterLotInventory, lotIdentity } from '../../lib/lot-inventory.js';
 import { sortProducts } from '../../lib/product-sort.js';
 
-export default function LotInventoryPage({ products, types }) {
+export default function LotInventoryPage({ products, types, user, onSaved }) {
   const [params, setParams] = useSearchParams();
   const typeId = params.get('typeId') || '';
   const productId = params.get('productId') || '';
@@ -19,11 +20,13 @@ export default function LotInventoryPage({ products, types }) {
   const [inventory, setInventory] = useState({ rows: [], loading: true, error: '' });
   const [refreshKey, setRefreshKey] = useState(0);
   const [detail, setDetail] = useState({ key: '', data: null, loading: false, error: '' });
+  const [editingTransaction, setEditingTransaction] = useState(null);
   const filtered = filterLotInventory(inventory.rows, { typeId, productId, search, status });
   const productOptions = sortProducts(products.filter((product) => !typeId || String(product.productTypeId) === typeId));
   const detailKey = hasDetail ? lotIdentity(detailProductId, detailLot) : '';
   const selectedRow = inventory.rows.find((row) => lotIdentity(row.productId, row.materialLotNumber) === detailKey);
   const currentDetail = detail.key === detailKey ? detail : { data: null, loading: hasDetail, error: '' };
+  const detailProduct = products.find((product) => String(product.id) === detailProductId) || currentDetail.data?.product;
 
   useEffect(() => {
     let active = true;
@@ -66,6 +69,16 @@ export default function LotInventoryPage({ products, types }) {
     if (row.materialLotNumber == null) next.set('unassigned', '1');
     else next.set('lot', row.materialLotNumber);
     setParams(next);
+  };
+  const onTransactionSaved = async (kind, edited = false) => {
+    setEditingTransaction(null);
+    setRefreshKey((key) => key + 1);
+    if (edited) {
+      const next = new URLSearchParams(params);
+      clearDetail(next);
+      setParams(next);
+    }
+    await onSaved?.(kind, edited);
   };
 
   return <>
@@ -112,6 +125,10 @@ export default function LotInventoryPage({ products, types }) {
               </tr>)}</tbody>
             </table></div>}
     </section>
+    {editingTransaction && detailProduct && <TransactionDialog
+      key={`lot-${editingTransaction.kind}-${editingTransaction.row.id}`} kind={editingTransaction.kind}
+      product={detailProduct} transaction={editingTransaction.row}
+      onClose={() => setEditingTransaction(null)} onSaved={onTransactionSaved} />}
     {hasDetail && <section className="lot-history-details" aria-label="Selected lot history">
       <div className="panel"><div className="panel-heading"><div>
         <h2>Material lot: {detailLot ?? 'Unassigned (N/A)'}</h2>
@@ -122,8 +139,12 @@ export default function LotInventoryPage({ products, types }) {
       {currentDetail.loading ? <div className="panel empty-state compact" role="status">Loading lot history…</div>
         : currentDetail.error ? <div className="notice error" role="alert">{currentDetail.error} Use Refresh to retry.</div>
           : currentDetail.data && <>
-            <HistoryTable title="Lot receiving history" subtitle="Receiving records assigned to this material lot only" rows={currentDetail.data.receiving} receiving />
-            <HistoryTable title="Lot usage history" subtitle="Usage records assigned to this material lot only" rows={currentDetail.data.usage} />
+            <HistoryTable title="Lot receiving history" subtitle="Receiving records assigned to this material lot only"
+              rows={currentDetail.data.receiving} receiving isAdmin={user?.isAdmin}
+              onEdit={(row) => setEditingTransaction({ kind: 'receiving', row })} />
+            <HistoryTable title="Lot usage history" subtitle="Usage records assigned to this material lot only"
+              rows={currentDetail.data.usage} isAdmin={user?.isAdmin}
+              onEdit={(row) => setEditingTransaction({ kind: 'usage', row })} />
           </>}
     </section>}
   </>;

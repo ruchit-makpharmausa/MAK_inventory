@@ -14,8 +14,9 @@ test('receiving history adds location while keeping quantity headers aligned', a
   const vite = await createServer({ optimizeDeps: { noDiscovery: true, include: [] }, server: { middlewareMode: true, hmr: { server: createHttpServer() }, watch: null }, appType: 'custom' });
   try {
     const { default: HistoryTable } = await vite.ssrLoadModule('/src/components/HistoryTable.jsx');
-    const render = (row, receiving) => renderToStaticMarkup(createElement(HistoryTable, {
+    const render = (row, receiving, isAdmin = false) => renderToStaticMarkup(createElement(HistoryTable, {
       title: receiving ? 'Receiving history' : 'Usage history', subtitle: '', rows: row ? [row] : [], receiving,
+      isAdmin, onEdit() {},
     }));
     await t.test('receiving shows the existing reference as MAK Release Number', () => {
       const html = render(receiving, true);
@@ -26,6 +27,9 @@ test('receiving history adds location while keeping quantity headers aligned', a
       assert.match(html, /Material lot number: RECEIVED-MAT-LOT/);
       assert.match(html, /<th scope="col" class="numeric">Received quantity<\/th>/);
       assert.ok(html.includes(`<td class="numeric">${quantity(receiving.quantity)}</td>`));
+      const adminHtml = render(receiving, true, true);
+      assert.match(adminHtml, /<th scope="col">Actions<\/th>/);
+      assert.match(adminHtml, />Edit<\/button>/);
     });
     await t.test('usage shows optional material lot alongside MAK lot number and quantity', () => {
       const html = render(usage, false);

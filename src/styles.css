@@ -171,6 +171,8 @@ textarea { resize: vertical; min-height: 61px; }
 .balance-banner strong { display: block; color: #176d5b; font: 700 23px 'Segoe UI', sans-serif; margin-top: 4px; }
 .balance-banner small { font: 500 12px 'Segoe UI', sans-serif; }
 .history-panel .empty-state { min-height: 98px; }
+.history-search { display: grid; gap: 6px; max-width: 520px; margin: 18px 0; color: #526478; font-size: 12px; font-weight: 600; }
+.history-search input { height: 40px; }
 .history-table { table-layout: fixed; }
 .history-date-column, .history-remarks-column { width: 20%; }
 .history-reference-column, .history-quantity-column { width: 30%; }
