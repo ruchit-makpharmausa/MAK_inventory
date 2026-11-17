@@ -14,7 +14,7 @@ const roundTrip = async (products, catalogTypes = types, transactions = {}) => {
   return result;
 };
 
-test('All-types dashboard export repeats product identity for each lot row without merged cells', async () => {
+test('All-types dashboard export repeats product identity and separates each release row within its lot', async () => {
   const workbook = await roundTrip([
     product({ totalReceived: 36, totalUsed: 9, availableBalance: 27 }),
     product({ id: 18, name: 'Second Bulk product', itemCode: '000124', makItemCode: 'TRV2584', totalReceived: 10, totalUsed: 0, availableBalance: 10 }),
@@ -44,21 +44,21 @@ test('All-types dashboard export repeats product identity for each lot row witho
   const sheet = workbook.getWorksheet('Bulk');
   assert.deepEqual(sheet.getRow(1).values.slice(1), headers);
   assert.equal(sheet.views[0].ySplit, 1);
-  assert.equal(sheet.rowCount, 8);
-  assert.deepEqual([2, 3, 4, 5, 6, 7, 8].map((row) => sheet.getCell(`D${row}`).value),
-    ['00001', '00123', 'lot10', 'N/A', 'Unassigned (N/A)', 'N/A', 'ONLY-SECOND']);
-  assert.deepEqual([2, 3, 4, 5, 6, 7, 8].map((row) => sheet.getCell(`E${row}`).value),
-    ['RN-001', 'RN-001, RN-002', 'RN-010', 'RN-003', 'RN-004', '', 'RN-018']);
-  assert.deepEqual([2, 3, 4, 5, 6, 7, 8].map((row) => [sheet.getCell(`F${row}`).value, sheet.getCell(`G${row}`).value, sheet.getCell(`H${row}`).value]),
-    [[5, 0, 5], [40, 8, 32], [10, 1, 9], [1, 0, 1], [2, 4, -2], [0, 3, -3], [10, 0, 10]]);
+  assert.equal(sheet.rowCount, 9);
+  assert.deepEqual([2, 3, 4, 5, 6, 7, 8, 9].map((row) => sheet.getCell(`D${row}`).value),
+    ['00001', '00123', '00123', 'lot10', 'N/A', 'Unassigned (N/A)', 'N/A', 'ONLY-SECOND']);
+  assert.deepEqual([2, 3, 4, 5, 6, 7, 8, 9].map((row) => sheet.getCell(`E${row}`).value),
+    ['RN-001', 'RN-002', 'RN-001', 'RN-010', 'RN-003', 'RN-004', '', 'RN-018']);
+  assert.deepEqual([2, 3, 4, 5, 6, 7, 8, 9].map((row) => [sheet.getCell(`F${row}`).value, sheet.getCell(`G${row}`).value, sheet.getCell(`H${row}`).value]),
+    [[5, 0, 5], [30, 8, 22], [10, 0, 10], [10, 1, 9], [1, 0, 1], [2, 4, -2], [0, 3, -3], [10, 0, 10]]);
   assert.deepEqual([sheet.getCell('A2').value, sheet.getCell('B2').value, sheet.getCell('C2').value], ['Sample product', '000123', 'TRV2583']);
   assert.deepEqual(Object.values(sheet._merges), []);
-  for (let row = 2; row <= 6; row++) {
+  for (let row = 2; row <= 7; row++) {
     assert.equal(sheet.getCell(`A${row}`).value, 'Sample product');
     assert.equal(sheet.getCell(`B${row}`).value, '000123');
     assert.equal(sheet.getCell(`C${row}`).value, 'TRV2583');
   }
-  assert.deepEqual([sheet.getCell('A7').value, sheet.getCell('B7').value, sheet.getCell('C7').value], ['Second Bulk product', '000124', 'TRV2584']);
+  assert.deepEqual([sheet.getCell('A8').value, sheet.getCell('B8').value, sheet.getCell('C8').value], ['Second Bulk product', '000124', 'TRV2584']);
   assert.equal(sheet.getCell('E3').alignment.wrapText, true);
   assert.equal(sheet.getCell('H2').numFmt, '#,##0');
   assert.equal(sheet.getCell('F3').type, ExcelJS.ValueType.Number);
@@ -72,13 +72,28 @@ test('All-types dashboard export repeats product identity for each lot row witho
   }
   assert.equal(sheet.getCell('D2').alignment.wrapText, true);
   assert.equal(sheet.getCell('E2').alignment.wrapText, true);
-  assert.equal(sheet.autoFilter, 'A1:H8');
+  assert.equal(sheet.autoFilter, 'A1:H9');
   assert.deepEqual([workbook.getWorksheet('IFC').getCell('D2').value, workbook.getWorksheet('IFC').getCell('E2').value,
     workbook.getWorksheet('IFC').getCell('F2').value], ['Orphan', 'RN-020', 100]);
   assert.deepEqual([workbook.getWorksheet('IFC').getCell('D3').value, workbook.getWorksheet('IFC').getCell('E3').value,
     workbook.getWorksheet('IFC').getCell('F3').value, workbook.getWorksheet('IFC').getCell('G3').value,
     workbook.getWorksheet('IFC').getCell('H3').value], ['OTHER-TYPE', 'RN-019', 7, 2, 5]);
   assert.deepEqual(workbook.getWorksheet('Label').getRow(1).values.slice(1), headers);
+});
+
+test('lot usage is allocated FIFO across release rows in receipt date and ID order', async () => {
+  const workbook = await roundTrip([product()], types, {
+    receiving: [
+      { id: 2, productId: 17, date: '2026-11-02', quantity: 10, materialLotNumber: 'LOT-A', makReleaseNumber: 'RN-LATER' },
+      { id: 1, productId: 17, date: '2026-11-01', quantity: 5, materialLotNumber: 'LOT-A', makReleaseNumber: 'RN-FIRST' },
+    ],
+    usage: [{ id: 1, productId: 17, date: '2026-11-03', quantity: 8, materialLotNumber: 'LOT-A' }],
+  });
+  const sheet = workbook.getWorksheet('Bulk');
+  assert.deepEqual([sheet.getCell('D2').value, sheet.getCell('E2').value, sheet.getCell('F2').value,
+    sheet.getCell('G2').value, sheet.getCell('H2').value], ['LOT-A', 'RN-FIRST', 5, 5, 0]);
+  assert.deepEqual([sheet.getCell('D3').value, sheet.getCell('E3').value, sheet.getCell('F3').value,
+    sheet.getCell('G3').value, sheet.getCell('H3').value], ['LOT-A', 'RN-LATER', 10, 3, 7]);
 });
 
 test('empty catalog exports registered header-only type sheets; an empty registry uses Inventory', async () => {
