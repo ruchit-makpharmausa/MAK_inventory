@@ -6,6 +6,7 @@ const columns = [
   { header: 'Item Code', key: 'itemCode', width: 20 },
   { header: 'MAK Item Code', key: 'makItemCode', width: 22 },
   { header: 'Customer LOT', key: 'lotNumber', width: 24 },
+  { header: 'MAK Release Number', key: 'makReleaseNumbers', width: 28 },
   { header: 'Total Received', key: 'totalReceived', width: 19 },
   { header: 'Total Used', key: 'totalUsed', width: 19 },
   { header: 'Balance', key: 'balance', width: 19 },
@@ -25,15 +26,19 @@ function productLots(products, receivingRows, usageRows) {
       const lots = quantities.get(id);
       const lotNumber = normalizedLot(transaction.materialLotNumber);
       const key = JSON.stringify(lotNumber);
-      const current = lots.get(key) || { lotNumber, received: 0, used: 0 };
+      const current = lots.get(key) || { lotNumber, received: 0, used: 0, makReleaseNumbers: new Set() };
       current[field] += numericQuantity(transaction.quantity);
+      const releaseNumber = typeof transaction.makReleaseNumber === 'string' ? transaction.makReleaseNumber.trim() : '';
+      if (field === 'received' && releaseNumber) {
+        current.makReleaseNumbers.add(releaseNumber);
+      }
       lots.set(key, current);
     }
   }
 
   return sortProducts(products).flatMap((product, index) => {
     const lots = [...(quantities.get(productId(product, index))?.values() || [])];
-    if (!lots.length) lots.push({ lotNumber: null, received: 0, used: 0 });
+    if (!lots.length) lots.push({ lotNumber: null, received: 0, used: 0, makReleaseNumbers: new Set() });
     lots.sort((a, b) => (a.lotNumber == null ? 1 : 0) - (b.lotNumber == null ? 1 : 0)
       || String(a.lotNumber ?? '').localeCompare(String(b.lotNumber ?? ''), undefined, { numeric: true, sensitivity: 'base' }));
     return lots.map((lot) => {
@@ -42,6 +47,7 @@ function productLots(products, receivingRows, usageRows) {
         throw new Error('Lot inventory quantities must be finite numbers.');
       }
       return { product, lotNumber: lot.lotNumber === null ? 'Unassigned (N/A)' : lot.lotNumber,
+        makReleaseNumbers: [...lot.makReleaseNumbers].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })).join(', '),
         totalReceived: lot.received, totalUsed: lot.used, balance };
     });
   });
@@ -94,13 +100,15 @@ export async function createInventoryWorkbook(products, types = [], transactions
       const excelRow = sheet.addRow({
         name: String(product.name ?? ''), itemCode: String(product.itemCode ?? ''),
         makItemCode: String(product.makItemCode ?? ''), lotNumber: row.lotNumber,
+        makReleaseNumbers: row.makReleaseNumbers,
         totalReceived: row.totalReceived, totalUsed: row.totalUsed, balance: row.balance,
       });
       excelRow.font = { name: 'Calibri', size: 12 };
       excelRow.height = 23;
       excelRow.getCell(1).alignment = { vertical: 'middle', wrapText: true };
       excelRow.getCell(4).alignment = { vertical: 'middle', wrapText: true };
-      for (const column of [5, 6, 7]) {
+      excelRow.getCell(5).alignment = { vertical: 'middle', wrapText: true };
+      for (const column of [6, 7, 8]) {
         excelRow.getCell(column).numFmt = balanceNumberFormat;
         excelRow.getCell(column).alignment = { horizontal: 'right', vertical: 'middle' };
       }
