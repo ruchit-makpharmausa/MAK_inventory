@@ -25,6 +25,10 @@ export async function recordAudit(db, event) {
 
 export function mountAuditLog(app, db) {
   const route = (handler) => (req, res, next) => Promise.resolve(handler(req, res)).catch(next);
+  app.use('/api/audit-logs', (req, res, next) => {
+    if (!req.user?.isAdmin) return res.status(403).json({ error: 'Administrator access is required to view audit logs.' });
+    next();
+  });
 
   app.get('/api/audit-logs/users', route(async (req, res) => {
     const result = await db.query(`

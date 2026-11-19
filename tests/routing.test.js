@@ -11,17 +11,20 @@ const pagePaths = ['/dashboard', '/products', '/receiving', '/usage', '/inv_hist
 test('workspace navigation defines distinct page URLs', () => {
   assert.deepEqual(navigation.map((item) => item.path), pagePaths);
   assert.equal(new Set(navigation.map((item) => item.path)).size, navigation.length);
+  assert.equal(navigation.find((item) => item.path === '/audit-log').adminOnly, true);
   assert.equal(navigation.find((item) => item.path === '/admin').adminOnly, true);
 });
 
 test('post-login destinations preserve allowed pages, product history selection, and authorization', () => {
-  for (const pathname of pagePaths.filter((value) => value !== '/admin')) assert.equal(loginDestination(pathname), pathname);
+  for (const pathname of pagePaths.filter((value) => !['/admin', '/audit-log'].includes(value))) assert.equal(loginDestination(pathname), pathname);
   assert.equal(loginDestination('/inv_history?productId=17#receiving'), '/inv_history?productId=17#receiving');
   assert.equal(loginDestination('/history?productId=17'), '/inv_history?productId=17');
   assert.equal(loginDestination('/lot-inventory?productId=17&lot=000LOT'), '/lot-inventory?productId=17&lot=000LOT');
   assert.equal(loginDestination('/products/'), '/products');
   assert.equal(loginDestination('/admin', true), '/admin');
   assert.equal(loginDestination('/admin', false), '/dashboard');
+  assert.equal(loginDestination('/audit-log', true), '/audit-log');
+  assert.equal(loginDestination('/audit-log', false), '/dashboard');
 });
 
 test('login redirects never send the browser to an external or unsupported destination', () => {

@@ -41,10 +41,10 @@ test('audit writer stores only event metadata and never request bodies', async (
   assert.doesNotMatch(call.statement, /password|requestBody|body/i);
 });
 
-async function withAuditApi(db, run) {
+async function withAuditApi(db, run, { isAdmin = true } = {}) {
   const app = express();
   app.use('/api', (req, _res, next) => {
-    req.user = { id: 5, username: 'user.one', displayName: 'User One', isAdmin: false };
+    req.user = { id: 5, username: 'user.one', displayName: 'User One', isAdmin };
     req.company = { id: 7, name: 'Quten', code: 'TRV' };
     next();
   });
@@ -102,6 +102,16 @@ test('audit user filter options come only from the selected company', async () =
   assert.match(call.statement, /WHERE company_id = @companyId/);
 });
 
+test('regular users are forbidden from listing audit events and filter users', async () => {
+  let queries = 0;
+  const db = { async query() { queries++; return { recordset: [] }; } };
+  await withAuditApi(db, async (request) => {
+    assert.equal((await request('/api/audit-logs')).status, 403);
+    assert.equal((await request('/api/audit-logs/users')).status, 403);
+  }, { isAdmin: false });
+  assert.equal(queries, 0);
+});
+
 test('authenticated API activity records method, path, status and selected company without payloads', async () => {
   const auditEvents = [];
   const company = { id: 7, name: 'Quten', code: 'TRV' };
@@ -137,7 +147,7 @@ test('authenticated API activity records method, path, status and selected compa
     const auditPage = await fetch(`http://127.0.0.1:${server.address().port}/api/audit-logs`, {
       headers: { Cookie: `mak_inventory_session=${'a'.repeat(64)}` },
     });
-    assert.equal(auditPage.status, 200);
+    assert.equal(auditPage.status, 403);
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(auditEvents.length, beforeCount);
   } finally { await new Promise((resolve) => server.close(resolve)); }

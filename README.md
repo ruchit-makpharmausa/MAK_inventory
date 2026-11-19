@@ -96,7 +96,7 @@ Before deploying, stop the app, back up the database, and run [scripts/company-w
 
 ### Audit log
 
-The **Audit Log** section is available to all signed-in users and shows events for the selected company only. It records successful logins (at the original sign-in time, once a company is selected), logouts, and authenticated API requests with user, timestamp, method, endpoint, and response status. Filter by user and inclusive date range; events are retained indefinitely and displayed 100 at a time with a **Load older events** option. It intentionally does not store passwords, request bodies, or form contents.
+The **Audit Log** section is available to administrators only and shows events for the selected company. The API also enforces administrator access. It records successful logins (at the original sign-in time, once a company is selected), logouts, and authenticated API requests with user, timestamp, method, endpoint, and response status. Filter by user and inclusive date range; events are retained indefinitely and displayed 100 at a time with a **Load older events** option. It intentionally does not store passwords, request bodies, or form contents.
 
 Before deploying, stop the app, back up the database, and run [scripts/audit-log.sql](./scripts/audit-log.sql) as a database administrator after the login and company migrations. Grant the app SQL login SELECT and INSERT on `dbo.audit_logs`. The schema check requires the table but does not apply the migration automatically.
 
