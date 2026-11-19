@@ -5,6 +5,7 @@ import { createInventoryWorkbook, exportInventoryWorkbook } from '../src/lib/inv
 
 const types = [{ id: 1, name: 'Bulk' }, { id: 2, name: 'IFC' }, { id: 3, name: 'Label' }];
 const headers = ['Product Name', 'Item Code', 'MAK Item Code', 'Customer LOT', 'MAK Release Number', 'Total Received', 'Total Used', 'Balance'];
+const bulkHeaders = [...headers.slice(0, 5), 'Location', ...headers.slice(5)];
 const product = (values = {}) => ({ id: 17, productTypeId: 1, productType: 'Bulk', name: 'Sample product',
   itemCode: '000123', makItemCode: 'TRV2583', unit: 'kgs', totalReceived: 0, totalUsed: 0, availableBalance: 0, ...values });
 const roundTrip = async (products, catalogTypes = types, transactions = {}) => {
@@ -21,16 +22,16 @@ test('All-types dashboard export repeats product identity and separates each rel
     product({ id: 19, productTypeId: 2, productType: 'IFC', name: 'Shared MAK code IFC', makItemCode: 'TRV2583' }),
   ], types, {
     receiving: [
-      { productId: 17, quantity: 30, materialLotNumber: '00123', makReleaseNumber: 'RN-002' },
-      { productId: '17', quantity: 5, materialLotNumber: '00001', makReleaseNumber: 'RN-001' },
-      { productId: 17, quantity: 5, materialLotNumber: '00123', makReleaseNumber: 'RN-001' },
-      { productId: 17, quantity: 5, materialLotNumber: '00123', makReleaseNumber: 'RN-001' },
-      { productId: 17, quantity: 10, materialLotNumber: 'lot10', makReleaseNumber: 'RN-010' },
-      { productId: 18, quantity: 10, materialLotNumber: 'ONLY-SECOND', makReleaseNumber: 'RN-018' },
-      { productId: 19, quantity: 7, materialLotNumber: 'OTHER-TYPE', makReleaseNumber: 'RN-019' },
-      { productId: 17, quantity: 1, materialLotNumber: 'N/A', makReleaseNumber: 'RN-003' },
-      { productId: 17, quantity: 2, materialLotNumber: null, makReleaseNumber: 'RN-004' },
-      { productId: 19, quantity: 100, materialLotNumber: 'Orphan', makReleaseNumber: 'RN-020' },
+      { id: 2, date: '2026-11-02', productId: 17, quantity: 30, materialLotNumber: '00123', makReleaseNumber: 'RN-002', location: 'A2C' },
+      { id: 1, date: '2026-11-01', productId: '17', quantity: 5, materialLotNumber: '00001', makReleaseNumber: 'RN-001', location: 'A2A' },
+      { id: 3, date: '2026-11-03', productId: 17, quantity: 5, materialLotNumber: '00123', makReleaseNumber: 'RN-001', location: 'A2B' },
+      { id: 4, date: '2026-11-04', productId: 17, quantity: 5, materialLotNumber: '00123', makReleaseNumber: 'RN-001', location: 'A2A' },
+      { productId: 17, quantity: 10, materialLotNumber: 'lot10', makReleaseNumber: 'RN-010', location: 'A2A' },
+      { productId: 18, quantity: 10, materialLotNumber: 'ONLY-SECOND', makReleaseNumber: 'RN-018', location: 'B1A' },
+      { productId: 19, quantity: 7, materialLotNumber: 'OTHER-TYPE', makReleaseNumber: 'RN-019', location: 'C1A' },
+      { productId: 17, quantity: 1, materialLotNumber: 'N/A', makReleaseNumber: 'RN-003', location: 'A2B' },
+      { productId: 17, quantity: 2, materialLotNumber: null, makReleaseNumber: 'RN-004', location: 'A2C' },
+      { productId: 19, quantity: 100, materialLotNumber: 'Orphan', makReleaseNumber: 'RN-020', location: 'C1B' },
     ],
     usage: [
       { productId: 17, quantity: 8, materialLotNumber: '00123' },
@@ -42,14 +43,16 @@ test('All-types dashboard export repeats product identity and separates each rel
   });
   assert.deepEqual(workbook.worksheets.map((sheet) => sheet.name), ['Bulk', 'IFC', 'Label']);
   const sheet = workbook.getWorksheet('Bulk');
-  assert.deepEqual(sheet.getRow(1).values.slice(1), headers);
+  assert.deepEqual(sheet.getRow(1).values.slice(1), bulkHeaders);
   assert.equal(sheet.views[0].ySplit, 1);
   assert.equal(sheet.rowCount, 9);
   assert.deepEqual([2, 3, 4, 5, 6, 7, 8, 9].map((row) => sheet.getCell(`D${row}`).value),
     ['00001', '00123', '00123', 'lot10', 'N/A', 'Unassigned (N/A)', 'N/A', 'ONLY-SECOND']);
   assert.deepEqual([2, 3, 4, 5, 6, 7, 8, 9].map((row) => sheet.getCell(`E${row}`).value),
     ['RN-001', 'RN-002', 'RN-001', 'RN-010', 'RN-003', 'RN-004', '', 'RN-018']);
-  assert.deepEqual([2, 3, 4, 5, 6, 7, 8, 9].map((row) => [sheet.getCell(`F${row}`).value, sheet.getCell(`G${row}`).value, sheet.getCell(`H${row}`).value]),
+  assert.deepEqual([2, 3, 4, 5, 6, 7, 8, 9].map((row) => sheet.getCell(`F${row}`).value),
+    ['A2A', 'A2C', 'A2A, A2B', 'A2A', 'A2B', 'A2C', '', 'B1A']);
+  assert.deepEqual([2, 3, 4, 5, 6, 7, 8, 9].map((row) => [sheet.getCell(`G${row}`).value, sheet.getCell(`H${row}`).value, sheet.getCell(`I${row}`).value]),
     [[5, 0, 5], [30, 8, 22], [10, 0, 10], [10, 1, 9], [1, 0, 1], [2, 4, -2], [0, 3, -3], [10, 0, 10]]);
   assert.deepEqual([sheet.getCell('A2').value, sheet.getCell('B2').value, sheet.getCell('C2').value], ['Sample product', '000123', 'TRV2583']);
   assert.deepEqual(Object.values(sheet._merges), []);
@@ -60,8 +63,9 @@ test('All-types dashboard export repeats product identity and separates each rel
   }
   assert.deepEqual([sheet.getCell('A8').value, sheet.getCell('B8').value, sheet.getCell('C8').value], ['Second Bulk product', '000124', 'TRV2584']);
   assert.equal(sheet.getCell('E3').alignment.wrapText, true);
-  assert.equal(sheet.getCell('H2').numFmt, '#,##0');
-  assert.equal(sheet.getCell('F3').type, ExcelJS.ValueType.Number);
+  assert.equal(sheet.getCell('F3').alignment.wrapText, true);
+  assert.equal(sheet.getCell('I2').numFmt, '#,##0');
+  assert.equal(sheet.getCell('G3').type, ExcelJS.ValueType.Number);
   for (let row = 2; row <= sheet.rowCount; row++) {
     for (const column of ['B', 'C']) {
       const cell = sheet.getCell(`${column}${row}`);
@@ -72,13 +76,14 @@ test('All-types dashboard export repeats product identity and separates each rel
   }
   assert.equal(sheet.getCell('D2').alignment.wrapText, true);
   assert.equal(sheet.getCell('E2').alignment.wrapText, true);
-  assert.equal(sheet.autoFilter, 'A1:H9');
+  assert.equal(sheet.autoFilter, 'A1:I9');
   assert.deepEqual([workbook.getWorksheet('IFC').getCell('D2').value, workbook.getWorksheet('IFC').getCell('E2').value,
     workbook.getWorksheet('IFC').getCell('F2').value], ['Orphan', 'RN-020', 100]);
   assert.deepEqual([workbook.getWorksheet('IFC').getCell('D3').value, workbook.getWorksheet('IFC').getCell('E3').value,
     workbook.getWorksheet('IFC').getCell('F3').value, workbook.getWorksheet('IFC').getCell('G3').value,
     workbook.getWorksheet('IFC').getCell('H3').value], ['OTHER-TYPE', 'RN-019', 7, 2, 5]);
   assert.deepEqual(workbook.getWorksheet('Label').getRow(1).values.slice(1), headers);
+  assert.deepEqual(workbook.getWorksheet('IFC').getRow(1).values.slice(1), headers);
 });
 
 test('lot usage is allocated FIFO across release rows in receipt date and ID order', async () => {
@@ -91,9 +96,9 @@ test('lot usage is allocated FIFO across release rows in receipt date and ID ord
   });
   const sheet = workbook.getWorksheet('Bulk');
   assert.deepEqual([sheet.getCell('D2').value, sheet.getCell('E2').value, sheet.getCell('F2').value,
-    sheet.getCell('G2').value, sheet.getCell('H2').value], ['LOT-A', 'RN-FIRST', 5, 5, 0]);
+    sheet.getCell('G2').value, sheet.getCell('H2').value, sheet.getCell('I2').value], ['LOT-A', 'RN-FIRST', '', 5, 5, 0]);
   assert.deepEqual([sheet.getCell('D3').value, sheet.getCell('E3').value, sheet.getCell('F3').value,
-    sheet.getCell('G3').value, sheet.getCell('H3').value], ['LOT-A', 'RN-LATER', 10, 3, 7]);
+    sheet.getCell('G3').value, sheet.getCell('H3').value, sheet.getCell('I3').value], ['LOT-A', 'RN-LATER', '', 10, 3, 7]);
 });
 
 test('empty catalog exports registered header-only type sheets; an empty registry uses Inventory', async () => {
@@ -101,7 +106,7 @@ test('empty catalog exports registered header-only type sheets; an empty registr
   assert.deepEqual(workbook.worksheets.map((sheet) => sheet.name), ['Bulk', 'IFC', 'Label']);
   for (const sheet of workbook.worksheets) {
     assert.equal(sheet.rowCount, 1);
-    assert.deepEqual(sheet.getRow(1).values.slice(1), headers);
+    assert.deepEqual(sheet.getRow(1).values.slice(1), sheet.name === 'Bulk' ? bulkHeaders : headers);
   }
   const noTypes = await roundTrip([], []);
   assert.deepEqual(noTypes.worksheets.map((sheet) => sheet.name), ['Inventory']);
@@ -119,12 +124,12 @@ test('new types, duplicate Item Codes, unsafe product codes and orphan usage lot
   const bulk = workbook.getWorksheet('Bulk');
   assert.deepEqual(Object.values(bulk._merges), []);
   assert.equal(bulk.getCell('D4').value, 'LOT-01');
-  assert.equal(bulk.getCell('E4').value, '');
-  assert.equal(bulk.getCell('F4').value, 4);
+  assert.equal(bulk.getCell('F4').value, '');
+  assert.equal(bulk.getCell('G4').value, 4);
   assert.equal(bulk.getCell('D5').value, 'USED-ONLY');
-  assert.equal(bulk.getCell('F5').value, 0);
-  assert.equal(bulk.getCell('G5').value, 2);
-  assert.equal(bulk.getCell('H5').value, -2);
+  assert.equal(bulk.getCell('G5').value, 0);
+  assert.equal(bulk.getCell('H5').value, 2);
+  assert.equal(bulk.getCell('I5').value, -2);
   assert.equal(bulk.rowCount, 5);
   assert.equal(bulk.getCell('A2').value, '=Literal');
   assert.equal(bulk.getCell('A3').value, 'Duplicate');
@@ -161,8 +166,8 @@ test('dashboard download exports lot-wise rows and preserves product codes as te
     assert.equal(sheet.getCell('B2').type, ExcelJS.ValueType.String);
     assert.equal(sheet.getCell('B2').value, '000123');
     assert.equal(sheet.getCell('D2').value, '000LOT');
-    assert.equal(sheet.getCell('F2').value, 123456789);
-    assert.equal(sheet.getCell('F2').numFmt, '#,##0');
+    assert.equal(sheet.getCell('G2').value, 123456789);
+    assert.equal(sheet.getCell('G2').numFmt, '#,##0');
   } finally {
     if (originalDocument) Object.defineProperty(globalThis, 'document', originalDocument);
     else delete globalThis.document;

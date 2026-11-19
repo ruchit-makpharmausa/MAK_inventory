@@ -7,6 +7,7 @@ import database, { connectionFailure } from './database.js';
 import { mountAuthentication } from './auth.js';
 import { mountUserAdministration } from './users.js';
 import { mountCompanyAdministration } from './companies.js';
+import { mountAuditLog } from './audit.js';
 import { mountLotInventory } from './lot-inventory.js';
 
 const productSelect = `
@@ -123,6 +124,7 @@ function transactionInputs(body, kind) {
 export function createApp(db = database, {
   serveClient = true,
   clientDirectory = fileURLToPath(new URL('../dist/', import.meta.url)),
+  auditEnabled = db === database,
 } = {}) {
   const app = express();
   app.use(cors());
@@ -159,7 +161,8 @@ export function createApp(db = database, {
     await db.query('SELECT TOP (0) id FROM dbo.products');
     res.json({ status: 'ok', database: 'sqlserver' });
   }));
-  mountAuthentication(app, db);
+  mountAuthentication(app, db, { auditEnabled });
+  mountAuditLog(app, db);
   mountUserAdministration(app, db);
   mountCompanyAdministration(app, db);
   mountLotInventory(app, db);

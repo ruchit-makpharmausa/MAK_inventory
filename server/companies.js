@@ -33,6 +33,7 @@ export function mountCompanyAdministration(app, db) {
         OUTPUT INSERTED.id, INSERTED.name, INSERTED.code
         VALUES (@name, @code)
       `, { name: [sql.NVarChar(150), name.trim()], code: [sql.NVarChar(20), code.trim().toUpperCase()] });
+      req.auditCompany = result.recordset[0];
       res.status(201).json(result.recordset[0]);
     } catch (error) {
       if ([2601, 2627].includes(error.number)) {
@@ -50,10 +51,11 @@ export function mountCompanyAdministration(app, db) {
     }
     const result = await db.query(`
       UPDATE dbo.companies SET is_active = 1
+      OUTPUT INSERTED.id, INSERTED.name, INSERTED.code
       WHERE id = @companyId AND is_active = 0;
-      SELECT @@ROWCOUNT AS matched;
     `, { companyId: [sql.Int, companyId] });
-    if (!result.recordset[0]?.matched) return res.status(404).json({ error: 'Company not found.' });
+    if (!result.recordset[0]) return res.status(404).json({ error: 'Company not found.' });
+    req.auditCompany = result.recordset[0];
     res.json({ id: companyId, restored: true });
   }));
 
@@ -65,10 +67,11 @@ export function mountCompanyAdministration(app, db) {
     }
     const result = await db.query(`
       UPDATE dbo.companies SET is_active = 0
+      OUTPUT INSERTED.id, INSERTED.name, INSERTED.code
       WHERE id = @companyId AND is_active = 1;
-      SELECT @@ROWCOUNT AS matched;
     `, { companyId: [sql.Int, companyId] });
-    if (!result.recordset[0]?.matched) return res.status(404).json({ error: 'Company not found.' });
+    if (!result.recordset[0]) return res.status(404).json({ error: 'Company not found.' });
+    req.auditCompany = result.recordset[0];
     res.json({ id: companyId, archived: true });
   }));
 }

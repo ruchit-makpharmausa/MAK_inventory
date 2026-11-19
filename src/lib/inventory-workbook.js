@@ -11,6 +11,11 @@ const columns = [
   { header: 'Total Used', key: 'totalUsed', width: 19 },
   { header: 'Balance', key: 'balance', width: 19 },
 ];
+const bulkColumns = [
+  ...columns.slice(0, 5),
+  { header: 'Location', key: 'location', width: 18 },
+  ...columns.slice(5),
+];
 
 const productTypeName = (value) => String(value ?? '').trim() || 'Other';
 const normalizedLot = (value) => value == null || !String(value).trim() ? null : String(value).trim();
@@ -32,6 +37,7 @@ function productLots(products, receivingRows, usageRows) {
         current.receipts.push({
           quantity: amount,
           makReleaseNumber: typeof transaction.makReleaseNumber === 'string' ? transaction.makReleaseNumber.trim() : '',
+          location: typeof transaction.location === 'string' ? transaction.location.trim() : '',
           date: String(transaction.date ?? ''),
           id: Number(transaction.id) || 0,
         });
@@ -50,11 +56,12 @@ function productLots(products, receivingRows, usageRows) {
       const releases = new Map();
       for (const receipt of lot.receipts) {
         const release = releases.get(receipt.makReleaseNumber)
-          || { makReleaseNumber: receipt.makReleaseNumber, received: 0, used: 0 };
+          || { makReleaseNumber: receipt.makReleaseNumber, received: 0, used: 0, date: receipt.date, id: receipt.id, locations: new Set() };
         release.received += receipt.quantity;
+        if (receipt.location) release.locations.add(receipt.location);
         releases.set(receipt.makReleaseNumber, release);
       }
-      const releaseRows = [...releases.values()];
+      const releaseRows = [...releases.values()].sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
       let remainingUsage = lot.used;
       for (const release of releaseRows) {
         release.used = Math.min(release.received, remainingUsage);
@@ -73,6 +80,7 @@ function productLots(products, receivingRows, usageRows) {
         return {
           product, lotNumber: lot.lotNumber === null ? 'Unassigned (N/A)' : lot.lotNumber,
           makReleaseNumber: release.makReleaseNumber,
+          location: [...(release.locations || [])].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })).join(', '),
           totalReceived: release.received, totalUsed: release.used, balance,
         };
       });
@@ -120,7 +128,8 @@ export async function createInventoryWorkbook(products, types = [], transactions
     const sheet = workbook.addWorksheet(worksheetName(group.name, usedNames), {
       views: [{ state: 'frozen', ySplit: 1 }],
     });
-    sheet.columns = columns.map((column) => ({ ...column }));
+    const sheetColumns = group.name.trim().toLocaleLowerCase() === 'bulk' ? bulkColumns : columns;
+    sheet.columns = sheetColumns.map((column) => ({ ...column }));
     const rows = productLots(group.products, rowsByType.receiving.get(group.transactionKey) || [], rowsByType.usage.get(group.transactionKey) || []);
     for (const row of rows) {
       const product = row.product;
@@ -128,6 +137,7 @@ export async function createInventoryWorkbook(products, types = [], transactions
         name: String(product.name ?? ''), itemCode: String(product.itemCode ?? ''),
         makItemCode: String(product.makItemCode ?? ''), lotNumber: row.lotNumber,
         makReleaseNumber: row.makReleaseNumber,
+        ...(sheetColumns === bulkColumns ? { location: row.location } : {}),
         totalReceived: row.totalReceived, totalUsed: row.totalUsed, balance: row.balance,
       });
       excelRow.font = { name: 'Calibri', size: 12 };
@@ -135,7 +145,9 @@ export async function createInventoryWorkbook(products, types = [], transactions
       excelRow.getCell(1).alignment = { vertical: 'middle', wrapText: true };
       excelRow.getCell(4).alignment = { vertical: 'middle', wrapText: true };
       excelRow.getCell(5).alignment = { vertical: 'middle', wrapText: true };
-      for (const column of [6, 7, 8]) {
+      const numericStart = sheetColumns === bulkColumns ? 7 : 6;
+      if (sheetColumns === bulkColumns) excelRow.getCell(6).alignment = { vertical: 'middle', wrapText: true };
+      for (let column = numericStart; column < numericStart + 3; column++) {
         excelRow.getCell(column).numFmt = balanceNumberFormat;
         excelRow.getCell(column).alignment = { horizontal: 'right', vertical: 'middle' };
       }
@@ -145,9 +157,9 @@ export async function createInventoryWorkbook(products, types = [], transactions
     sheet.getRow(1).eachCell((cell, column) => {
       cell.font = { name: 'Calibri', size: 12, bold: true, color: { argb: 'FFFFFFFF' } };
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF102B4E' } };
-      cell.alignment = { vertical: 'middle', horizontal: column >= 5 ? 'right' : 'left', wrapText: true };
+      cell.alignment = { vertical: 'middle', horizontal: column >= (sheetColumns === bulkColumns ? 7 : 5) ? 'right' : 'left', wrapText: true };
     });
-    sheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: sheet.rowCount, column: columns.length } };
+    sheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: sheet.rowCount, column: sheetColumns.length } };
   }
   return workbook;
 }

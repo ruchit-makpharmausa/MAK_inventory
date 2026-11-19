@@ -12,6 +12,7 @@ import UsagePage from './pages/usage/UsagePage.jsx';
 import InventoryHistoryPage from './pages/history/InventoryHistoryPage.jsx';
 import LotInventoryPage from './pages/lots/LotInventoryPage.jsx';
 import AdminPage from './pages/admin/AdminPage.jsx';
+import AuditLogPage from './pages/audit/AuditLogPage.jsx';
 import NotFoundPage from './pages/not-found/NotFoundPage.jsx';
 import api from './lib/api.js';
 import { exportCsv } from './lib/csv.js';
@@ -225,6 +226,7 @@ function App() {
           <Route path="/usage" element={<UsagePage products={allProducts} types={types} onSaved={onTransactionSaved} />} />
           <Route path="/inv_history" element={<InventoryHistoryPage products={allProducts} types={types} onSaved={onTransactionSaved} user={user} />} />
           <Route path="/lot-inventory" element={<LotInventoryPage products={allProducts} types={types} user={user} onSaved={onTransactionSaved} />} />
+          <Route path="/audit-log" element={<AuditLogPage />} />
           <Route path="/history" element={<Navigate to={`/inv_history${location.search}${location.hash}`} replace />} />
           <Route path="/admin" element={user?.isAdmin ? <AdminPage api={api} /> : <Navigate to="/dashboard" replace />} />
           <Route path="*" element={<NotFoundPage />} />

@@ -142,6 +142,20 @@ th.numeric { text-align: right; }
 .field-help { display: block; color: #778598; font-size: 11px; line-height: 1.5; margin-top: 5px; }
 .users-table { min-width: 420px; }
 .users-table td { white-space: normal; overflow-wrap: anywhere; }
+.audit-table { min-width: 900px; }
+.audit-table td { white-space: normal; overflow-wrap: anywhere; }
+.audit-table .audit-endpoint { min-width: 270px; font-family: Consolas, monospace; font-size: 10px; }
+.audit-username { display: block; color: #8a96a4; font-size: 10px; margin-top: 3px; }
+.audit-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; padding: 0 20px 16px; }
+.audit-filters label { flex: 1 1 170px; }
+.audit-filters input, .audit-filters select { height: 38px; }
+.audit-filter-actions { display: flex; gap: 8px; }
+.audit-load-more { display: flex; justify-content: center; padding: 14px; }
+.audit-table { min-width: 900px; }
+.audit-table td { white-space: normal; overflow-wrap: anywhere; }
+.audit-table .audit-endpoint { min-width: 270px; font-family: Consolas, monospace; font-size: 10px; }
+.audit-username { display: block; color: #8a96a4; font-size: 10px; margin-top: 3px; }
+.audit-load-more { display: flex; justify-content: center; padding: 14px; }
 label { display: block; min-width: 0; color: #536376; font-size: 11px; font-weight: 600; line-height: 1.5; }
 label > input, label > select, label > textarea, label > .inline-select { margin-top: 6px; }
 input, select, textarea { border: 1px solid #dfe6ec; border-radius: 5px; background: #fff; color: #3e5063; outline: none; padding: 9px 10px; width: 100%; font-size: 11px; }

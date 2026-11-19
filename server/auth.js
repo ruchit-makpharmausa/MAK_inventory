@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import sql from 'mssql';
 import { validUsername, verifyPassword } from './passwords.js';
+import { recordAudit } from './audit.js';
 
 const cookieName = 'mak_inventory_session';
 const sessionSeconds = 8 * 60 * 60;
@@ -18,7 +19,7 @@ export function sessionToken(req) {
   return /^[a-f0-9]{64}$/.test(value || '') ? value : null;
 }
 
-export function mountAuthentication(app, db) {
+export function mountAuthentication(app, db, { auditEnabled = false } = {}) {
   const attempts = new Map();
   const forwardError = (error, next) => {
     if ([207, 208].includes(error.number)) {
@@ -37,6 +38,7 @@ export function mountAuthentication(app, db) {
     if (!token) return null;
     const result = await db.query(`
       SELECT u.id, u.username, u.display_name AS displayName, u.is_admin AS isAdmin,
+             s.created_at AS loginAt,
              c.id AS companyId, c.name AS companyName, c.code AS companyCode
       FROM dbo.user_sessions s JOIN dbo.app_users u ON u.id = s.user_id
       LEFT JOIN dbo.companies c ON c.id = s.current_company_id AND c.is_active = 1
@@ -63,6 +65,10 @@ export function mountAuthentication(app, db) {
   app.get('/api/auth/session', route(async (req, res) => {
     const user = await findUser(req);
     if (!user) clearCookie(req, res);
+    if (auditEnabled && user?.companyId) await recordAudit(db, {
+      user, company: { id: user.companyId, name: user.companyName, code: user.companyCode },
+      action: 'session_check', method: 'GET', endpoint: '/api/auth/session', statusCode: 200,
+    });
     res.json({ user: user ? publicUser(user) : null });
   }));
 
@@ -108,9 +114,16 @@ export function mountAuthentication(app, db) {
 
   app.post('/api/auth/logout', route(async (req, res) => {
     const token = sessionToken(req);
-    if (token) await db.query('DELETE FROM dbo.user_sessions WHERE token_hash = @tokenHash', {
-      tokenHash: [sql.Char(64), tokenHash(token)],
-    });
+    if (token) {
+      const user = await findUser(req);
+      if (auditEnabled && user) await recordAudit(db, {
+        user, company: user.companyId ? { id: user.companyId, name: user.companyName, code: user.companyCode } : null,
+        action: 'logout', method: 'POST', endpoint: '/api/auth/logout', statusCode: 200,
+      });
+      await db.query('DELETE FROM dbo.user_sessions WHERE token_hash = @tokenHash', {
+        tokenHash: [sql.Char(64), tokenHash(token)],
+      });
+    }
     clearCookie(req, res);
     res.json({ message: 'Signed out.' });
   }));
@@ -123,6 +136,18 @@ export function mountAuthentication(app, db) {
         return res.status(401).json({ error: 'Please sign in to continue.' });
       }
       req.user = publicUser(user);
+      req.loginAt = user.loginAt;
+      const isAuditLogRequest = req.path.startsWith('/audit-logs')
+        || req.originalUrl?.split('?')[0].startsWith('/api/audit-logs');
+      if (auditEnabled && !isAuditLogRequest) {
+        res.once('finish', () => {
+          const company = req.auditCompany || req.company || (req.user.company ? req.user.company : null);
+          recordAudit(db, {
+            user: req.user, company, action: 'api_request', method: req.method,
+            endpoint: req.path, statusCode: res.statusCode,
+          }).catch((error) => console.error('Audit log write failed:', error.code || error.number || error.name));
+        });
+      }
       if (req.path === '/companies' || req.path.startsWith('/companies/')
           || ['/auth/company', '/auth/company/clear'].includes(req.path)) return next();
       if (!req.user.company) return res.status(409).json({ error: 'Choose a company to continue.' });
@@ -145,6 +170,13 @@ export function mountAuthentication(app, db) {
     const token = sessionToken(req);
     await db.query(`UPDATE dbo.user_sessions SET current_company_id = @companyId WHERE token_hash = @tokenHash`, {
       companyId: [sql.Int, companyId], tokenHash: [sql.Char(64), tokenHash(token)],
+    });
+    req.auditCompany = { id: company.companyId, name: company.companyName, code: company.companyCode };
+    if (auditEnabled) await recordAudit(db, {
+      user: req.user, company: req.auditCompany,
+      action: req.user.company ? 'company_selected' : 'login', method: 'POST',
+      endpoint: req.user.company ? '/api/auth/company' : '/api/auth/login',
+      occurredAt: req.user.company ? null : req.loginAt, statusCode: 200,
     });
     res.json({ user: publicUser({ ...req.user, ...company }) });
   }));

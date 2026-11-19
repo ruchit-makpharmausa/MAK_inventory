@@ -42,7 +42,7 @@ test('administrators can add, archive, and restore companies without deleting th
   const db = { async query(statement, parameters) {
     statements.push({ statement, parameters });
     if (statement.includes('INSERT INTO dbo.companies')) return { recordset: [{ id: 8, name: 'Acme', code: 'ACM' }] };
-    return { recordset: [{ matched: 1 }] };
+    return { recordset: [{ id: 8, name: 'Acme', code: 'ACM' }] };
   } };
   await withApi(db, { id: 1, isAdmin: true }, async (request) => {
     assert.deepEqual(await request('/api/companies', { name: 'Acme', code: 'acm' }), {

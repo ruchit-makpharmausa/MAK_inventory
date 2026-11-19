@@ -5,6 +5,7 @@ export const navigation = [
   { path: '/usage', label: 'Usage', icon: '↑' },
   { path: '/inv_history', label: 'Inventory History', icon: '◷' },
   { path: '/lot-inventory', label: 'Lot Inventory', icon: '▦' },
+  { path: '/audit-log', label: 'Audit Log', icon: '◷' },
   { path: '/admin', label: 'Admin Panel', icon: '⚙', adminOnly: true },
 ];
 
