@@ -7,7 +7,7 @@ import { expectedColumns } from '../server/database.js';
 const migration = readFileSync(new URL('../scripts/inventory-transfers.sql', import.meta.url), 'utf8');
 const source = { id: 17, companyId: 7, productTypeId: 1, productType: 'Bulk', name: 'Source', itemCode: 'SRC', makItemCode: 'TRV-SRC', unit: 'Pcs', availableBalance: 10 };
 const destination = { ...source, id: 18, name: 'Destination', itemCode: 'DST', makItemCode: 'TRV-DST', availableBalance: 2 };
-const transferBody = { sourceProductId: 17, destinationProductId: 18, sourceMaterialLotNumber: ' A2A-LOT ', destinationMakLotNumber: ' TRV-MAK-LOT-9 ', transferDate: '2026-11-12', quantity: 4 };
+const transferBody = { sourceProductId: 17, destinationProductId: 18, sourceMaterialLotNumber: ' A2A-LOT ', transferDate: '2026-11-12', quantity: 4 };
 
 function mockDatabase(responses = []) {
   const calls = [];
@@ -60,22 +60,22 @@ test('transfer schema is company-bound, auditable, immutable, and records both l
   assert.match(migration, /BEGIN TRY[\s\S]*BEGIN TRANSACTION[\s\S]*COMMIT TRANSACTION/);
 });
 
-test('transfer moves the full available balance and preserves each material lot at the destination', async () => {
+test('transfer moves a requested quantity from one selected lot and preserves that lot at the destination', async () => {
   const db = mockDatabase([
     [{ id: 17 }], [{ id: 18 }], [source], [destination],
-    [{ materialLotNumber: 'A2A-LOT', availableQuantity: 6 }, { materialLotNumber: null, availableQuantity: 4 }],
-    [{ id: 51 }], [{ id: 52 }],
+    [{ materialLotNumber: 'A2A-LOT', availableQuantity: 6 }, { materialLotNumber: null, availableQuantity: 4 }], [{ id: 51 }],
   ]);
   await withApi(db, async (request) => {
-    const result = await request('/api/transfers', { sourceProductId: 17, destinationProductId: 18 });
+    const result = await request('/api/transfers', transferBody);
     assert.equal(result.status, 201, result.body.error);
-    assert.deepEqual(result.body, { ids: [51, 52], sourceProductId: 17, destinationProductId: 18, quantity: 10, id: 51 });
+    assert.deepEqual(result.body, { id: 51, sourceProductId: 17, destinationProductId: 18,
+      sourceLot: 'A2A-LOT', destinationMakItemCode: 'TRV-DST', quantity: 4 });
   });
   assert.deepEqual(db.calls.slice(0, 2).map((call) => call.parameters.productId[1]), [17, 18]);
   assert.ok(db.calls.slice(0, 2).every((call) => call.executor === db.token && /UPDLOCK, HOLDLOCK/.test(call.statement)));
   const inserts = db.calls.filter((call) => call.statement.includes('INSERT INTO dbo.inventory_transfers'));
-  assert.equal(inserts.length, 2);
-  const [insert, unassignedInsert] = inserts;
+  assert.equal(inserts.length, 1);
+  const insert = inserts[0];
   assert.match(insert.statement, /INSERT INTO dbo\.inventory_transfers/);
   assert.equal(insert.parameters.companyId[1], 7);
   assert.equal(insert.parameters.sourceProductId[1], 17);
@@ -83,22 +83,22 @@ test('transfer moves the full available balance and preserves each material lot 
   assert.equal(insert.parameters.sourceMaterialLotNumber[1], 'A2A-LOT');
   assert.equal(insert.parameters.destinationMaterialLotNumber[1], 'A2A-LOT');
   assert.equal(insert.parameters.destinationMakLotNumber[1], 'TRV-DST');
-  assert.equal(insert.parameters.quantity[1], 6);
+  assert.equal(insert.parameters.quantity[1], 4);
+  assert.equal(insert.parameters.transferDate[1].toISOString(), '2026-11-12T00:00:00.000Z');
   assert.equal(insert.parameters.addedByUserId[1], 9);
-  assert.equal(unassignedInsert.parameters.sourceMaterialLotNumber[1], null);
-  assert.equal(unassignedInsert.parameters.destinationMaterialLotNumber[1], null);
-  assert.equal(unassignedInsert.parameters.quantity[1], 4);
 });
 
-test('unassigned source stock is selectable and transfers are constrained to source lot availability', async () => {
+test('unassigned source lot can transfer a partial quantity', async () => {
   const db = mockDatabase([
     [{ id: 17 }], [{ id: 18 }], [source], [destination],
     [{ materialLotNumber: null, availableQuantity: 10 }], [{ id: 52 }],
   ]);
   await withApi(db, async (request) => {
-    const result = await request('/api/transfers', { sourceProductId: 17, destinationProductId: 18 });
+    const result = await request('/api/transfers', { ...transferBody, sourceMaterialLotNumber: null, quantity: 4 });
     assert.equal(result.status, 201, result.body.error);
     assert.equal(db.calls.at(-1).parameters.sourceMaterialLotNumber[1], null);
+    assert.equal(db.calls.at(-1).parameters.destinationMaterialLotNumber[1], null);
+    assert.equal(db.calls.at(-1).parameters.quantity[1], 4);
   });
 });
 
@@ -129,11 +129,12 @@ test('a product transfer history is scoped to the selected company and product',
   assert.match(db.calls[1].statement, /source_product_id = @productId OR t\.destination_product_id = @productId/);
 });
 
-test('transfers reject invalid products, cross-company products, incompatible units, and inconsistent source balances', async () => {
+test('transfers reject invalid products, cross-company products, incompatible units, and invalid quantities', async () => {
   const noDatabase = mockDatabase();
   await withApi(noDatabase, async (request) => {
     assert.equal((await request('/api/transfers', { ...transferBody, destinationProductId: 17 })).status, 400);
     assert.equal((await request('/api/transfers', { sourceProductId: 'bad', destinationProductId: 18 })).status, 400);
+    assert.equal((await request('/api/transfers', { ...transferBody, quantity: 0 })).status, 400);
     assert.equal(noDatabase.calls.length, 0);
   });
 
@@ -154,9 +155,19 @@ test('transfers reject invalid products, cross-company products, incompatible un
 
   const inconsistent = mockDatabase([[{ id: 17 }], [{ id: 18 }], [source], [destination], [{ materialLotNumber: 'A2A-LOT', availableQuantity: 5 }]]);
   await withApi(inconsistent, async (request) => {
-    const result = await request('/api/transfers', { sourceProductId: 17, destinationProductId: 18 });
+    const result = await request('/api/transfers', transferBody);
     assert.equal(result.status, 400);
     assert.match(result.body.error, /lot balances do not match/);
     assert.equal(inconsistent.calls.some((call) => call.statement.includes('INSERT INTO dbo.inventory_transfers')), false);
+  });
+
+  const insufficientLot = mockDatabase([[{ id: 17 }], [{ id: 18 }], [source], [destination], [
+    { materialLotNumber: 'A2A-LOT', availableQuantity: 3 }, { materialLotNumber: null, availableQuantity: 7 },
+  ]]);
+  await withApi(insufficientLot, async (request) => {
+    const result = await request('/api/transfers', { ...transferBody, quantity: 4 });
+    assert.equal(result.status, 400);
+    assert.match(result.body.error, /selected lot/);
+    assert.equal(insufficientLot.calls.some((call) => call.statement.includes('INSERT INTO dbo.inventory_transfers')), false);
   });
 });

@@ -584,6 +584,13 @@ export function createApp(db = database, {
     const body = req.body || {};
     if (!validId(body.sourceProductId) || !validId(body.destinationProductId)) return fail(res, 400, 'Select valid source and destination products.');
     if (Number(body.sourceProductId) === Number(body.destinationProductId)) return fail(res, 400, 'Source and destination products must be different.');
+    if (!Object.hasOwn(body, 'sourceMaterialLotNumber') || !optionalText(body.sourceMaterialLotNumber)
+        || (body.sourceMaterialLotNumber !== null && !requiredText(body.sourceMaterialLotNumber))
+        || tooLong(body.sourceMaterialLotNumber, 255)) return fail(res, 400, 'Select a valid source material lot.');
+    if (!requiredText(body.transferDate) || !/^\d{4}-\d{2}-\d{2}$/.test(body.transferDate)
+        || !Number.isFinite(Date.parse(`${body.transferDate}T00:00:00Z`))
+        || new Date(`${body.transferDate}T00:00:00Z`).toISOString().slice(0, 10) !== body.transferDate) return fail(res, 400, 'Enter a valid transfer date.');
+    if (typeof body.quantity !== 'number' || !Number.isFinite(body.quantity) || body.quantity <= 0) return fail(res, 400, 'Quantity must be greater than zero.');
 
     const sourceProductId = Number(body.sourceProductId);
     const destinationProductId = Number(body.destinationProductId);
@@ -593,40 +600,46 @@ export function createApp(db = database, {
       }
       const source = await getProduct(sourceProductId, req.company.id, executor);
       const destination = await getProduct(destinationProductId, req.company.id, executor);
+      if (String(source.productTypeId) !== String(destination.productTypeId)) {
+        return { status: 400, error: 'Source and destination products must use the same product type.' };
+      }
       const canonicalUnit = (value) => ['kg', 'kgs'].includes(String(value).trim().toLowerCase()) ? 'kg'
         : String(value).trim().toLowerCase() === 'pcs' ? 'pcs' : String(value).trim().toLowerCase();
       if (canonicalUnit(source.unit) !== canonicalUnit(destination.unit)) {
         return { status: 400, error: 'Source and destination products must use compatible units.' };
       }
       const lots = await getTransferLots(sourceProductId, executor);
-      const quantity = lots.reduce((total, lot) => total + Number(lot.availableQuantity), 0);
-      if (quantity <= 0 || Math.abs(quantity - Number(source.availableBalance)) > Math.max(1, quantity) * 1e-9) {
+      const lotTotal = lots.reduce((total, lot) => total + Number(lot.availableQuantity), 0);
+      if (Math.abs(lotTotal - Number(source.availableBalance)) > Math.max(1, lotTotal) * 1e-9) {
         return { status: 400, error: 'The source lot balances do not match the available product balance. Refresh inventory before transferring.' };
       }
-      const transferDate = new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`);
-      const ids = [];
-      for (const lot of lots) {
-        const inserted = await db.query(`
-          INSERT INTO dbo.inventory_transfers
-            (company_id, source_product_id, destination_product_id, source_material_lot_number,
-             destination_material_lot_number, destination_mak_lot_number, transfer_date, quantity, added_by_user_id)
-          OUTPUT INSERTED.id
-          VALUES (@companyId, @sourceProductId, @destinationProductId, @sourceMaterialLotNumber,
-                  @destinationMaterialLotNumber, @destinationMakLotNumber, @transferDate, @quantity, @addedByUserId)
-        `, {
-          companyId: [sql.Int, req.company.id], sourceProductId: [sql.Int, sourceProductId],
-          destinationProductId: [sql.Int, destinationProductId], sourceMaterialLotNumber: [sql.NVarChar(255), lot.materialLotNumber],
-          destinationMaterialLotNumber: [sql.NVarChar(255), lot.materialLotNumber],
-          destinationMakLotNumber: [sql.NVarChar(255), destination.makItemCode || destination.itemCode],
-          transferDate: [sql.Date, transferDate], quantity: [sql.Float, Number(lot.availableQuantity)],
-          addedByUserId: [sql.Int, req.user.id],
-        }, executor);
-        ids.push(inserted.recordset[0].id);
+      const sourceLot = body.sourceMaterialLotNumber?.trim() || null;
+      const selectedLot = lots.find((lot) => (lot.materialLotNumber?.trim() || null) === sourceLot);
+      const lotBalance = Number(selectedLot?.availableQuantity || 0);
+      if (!selectedLot) return { status: 400, error: 'Select a lot with available inventory for this product.' };
+      if (body.quantity > lotBalance) {
+        return { status: 400, error: `Insufficient inventory in selected lot. Available: ${lotBalance} ${source.unit}.` };
       }
-      return { ids, sourceProductId, destinationProductId, quantity };
+      const inserted = await db.query(`
+        INSERT INTO dbo.inventory_transfers
+          (company_id, source_product_id, destination_product_id, source_material_lot_number,
+           destination_material_lot_number, destination_mak_lot_number, transfer_date, quantity, added_by_user_id)
+        OUTPUT INSERTED.id
+        VALUES (@companyId, @sourceProductId, @destinationProductId, @sourceMaterialLotNumber,
+                @destinationMaterialLotNumber, @destinationMakLotNumber, @transferDate, @quantity, @addedByUserId)
+      `, {
+        companyId: [sql.Int, req.company.id], sourceProductId: [sql.Int, sourceProductId],
+        destinationProductId: [sql.Int, destinationProductId], sourceMaterialLotNumber: [sql.NVarChar(255), sourceLot],
+        destinationMaterialLotNumber: [sql.NVarChar(255), sourceLot],
+        destinationMakLotNumber: [sql.NVarChar(255), destination.makItemCode || destination.itemCode],
+        transferDate: [sql.Date, new Date(`${body.transferDate}T00:00:00Z`)], quantity: [sql.Float, body.quantity],
+        addedByUserId: [sql.Int, req.user.id],
+      }, executor);
+      return { id: inserted.recordset[0].id, sourceProductId, destinationProductId, sourceLot,
+        destinationMakItemCode: destination.makItemCode || destination.itemCode, quantity: body.quantity };
     });
     if (result.error) return fail(res, result.status, result.error);
-    res.status(201).json({ ...result, id: result.ids[0] });
+    res.status(201).json(result);
   }));
   app.get('/api/products/:id/transfers', route(async (req, res) => {
     if (!validId(req.params.id)) return fail(res, 404, 'Product not found.');

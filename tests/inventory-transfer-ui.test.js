@@ -9,7 +9,7 @@ import { createServer } from 'vite';
 const source = { id: 17, productTypeId: 1, productType: 'Bulk', name: 'Source stock', itemCode: 'SRC-01', makItemCode: 'TRV-SRC', unit: 'Pcs', availableBalance: 12 };
 const destination = { id: 18, productTypeId: 1, productType: 'Bulk', name: 'Destination stock', itemCode: 'DST-01', makItemCode: 'TRV-DST', unit: 'Pcs', availableBalance: 3 };
 
-test('transfer dialog moves a full balance between compatible MAK Item Codes and preserves lots', async () => {
+test('transfer dialog selects a source lot, quantity, date, and compatible destination product', async () => {
   const vite = await createServer({ optimizeDeps: { noDiscovery: true, include: [] }, server: { middlewareMode: true, hmr: { server: createHttpServer() }, watch: null }, appType: 'custom' });
   try {
     const { default: TransferDialog } = await vite.ssrLoadModule('/src/components/TransferDialog.jsx');
@@ -17,15 +17,19 @@ test('transfer dialog moves a full balance between compatible MAK Item Codes and
     const html = renderToStaticMarkup(createElement(TransferDialog, {
       sourceProduct: source, products: [source, destination, otherTypeProduct], onClose() {}, onSaved() {},
     }));
-    assert.match(html, /Transfer MAK Item Code/);
+    assert.match(html, /Transfer a lot/);
     assert.match(html, /From: TRV-SRC/);
-    assert.match(html, /Full available balance: 12 Pcs/);
-    assert.match(html, /All available material lots and quantities will be retained/);
+    assert.match(html, /Available in this product: 12 Pcs/);
+    assert.match(html, /name="sourceMaterialLotNumber" required=""/);
+    assert.match(html, /Select source lot/);
+    assert.match(html, /Loading available lots for this product/);
     assert.match(html, /name="destinationProductId" required=""/);
     assert.match(html, /TRV-DST · Destination stock \(DST-01\)/);
     assert.doesNotMatch(html, /SL-19|Other type product/);
-    assert.match(html, /Transfer full balance/);
-    assert.doesNotMatch(html, /sourceMaterialLotNumber|destinationMakLotNumber|transferDate|name="quantity"/);
+    assert.match(html, /name="transferDate" type="date" required=""/);
+    assert.match(html, /name="quantity" type="number" min="0" step="any" required=""/);
+    assert.match(html, /Transfer quantity/);
+    assert.doesNotMatch(html, /destinationMakLotNumber/);
   } finally {
     await vite.close();
   }
