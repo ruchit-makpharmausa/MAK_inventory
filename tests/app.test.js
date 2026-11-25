@@ -43,7 +43,7 @@ async function withApi(db, run) {
 }
 
 test('catalog and transaction reads use the authenticated session company', async () => {
-  const db = mockDatabase([[product], []]);
+  const db = mockDatabase([[product], [], []]);
   await withApi(db, async (request) => {
     assert.equal((await request('/api/products')).status, 200);
     assert.equal((await request('/api/transactions/receiving')).status, 200);
@@ -52,6 +52,9 @@ test('catalog and transaction reads use the authenticated session company', asyn
   assert.match(db.calls[0].statement, /WHERE p\.company_id = @companyId/);
   assert.equal(db.calls[1].parameters.companyId[1], 7);
   assert.match(db.calls[1].statement, /WHERE p\.company_id = @companyId/);
+  assert.equal(db.calls[2].parameters.companyId[1], 7);
+  assert.match(db.calls[2].statement, /FROM dbo\.inventory_transfers/);
+  assert.doesNotMatch(db.calls[1].statement, /UNION ALL/);
 });
 
 test('new products are assigned to the selected company, ignoring client-supplied company IDs', async () => {
@@ -433,6 +436,27 @@ test('shipment log lists the SKU, selected material lot, and shipped-product ref
   assert.match(db.calls[0].statement, /WHERE s\.company_id = @companyId/);
 });
 
+test('shipment log reports a specific migration instruction when its database schema is stale', async () => {
+  const schemaError = Object.assign(new Error('Invalid column name.'), { number: 207 });
+  const db = mockDatabase([schemaError]);
+  await withApi(db, async (request) => {
+    const result = await request('/api/shipments');
+    assert.equal(result.status, 503);
+    assert.match(result.body.error, /Shipment database schema is incomplete/);
+    assert.match(result.body.error, /inventory-shipments\.sql/);
+  });
+});
+
+test('database missing-table and missing-column errors give migration guidance', async () => {
+  const db = mockDatabase([Object.assign(new Error('Invalid column.'), { number: 207 })]);
+  await withApi(db, async (request) => {
+    const result = await request('/api/transactions/receiving');
+    assert.equal(result.status, 503);
+    assert.match(result.body.error, /missing a required table or column/);
+    assert.match(result.body.error, /SQL migrations/);
+  });
+});
+
 test('usage rejects unknown, exhausted, orphaned, other-product and differently cased material lots without inserting', async () => {
   for (const materialLotNumber of ['UNKNOWN', 'EXHAUSTED', 'ORPHAN', 'OTHER-PRODUCT', 'lot']) {
     const availableLots = ['EXHAUSTED', 'ORPHAN'].includes(materialLotNumber) ? [] : [{ materialLotNumber: 'LOT', availableQuantity: 10 }];
@@ -584,8 +608,10 @@ test('receiving and usage reject missing products under the lock without checkin
 });
 
 test('receiving persists independent MAK Release Number and material lot values and returns them in reads', async () => {
-  const receipt = { id: 3, location: 'A2C', makReleaseNumber: 'RN-001', materialLotNumber: 'MAT-001' };
-  const db = mockDatabase([[{ id: 17 }], [{ id: 3 }], [receipt], [product], [receipt], [], []]);
+  const receipt = { id: 3, date: '2026-10-17', location: 'A2C', makReleaseNumber: 'RN-001', materialLotNumber: 'MAT-001' };
+  const transfer = { id: -51, productId: 18, date: '2026-10-18', quantity: 2, materialLotNumber: 'MAT-TRANSFER',
+    location: null, makReleaseNumber: 'TRV-DST', remarks: 'Transfer from source', productName: 'Destination', itemCode: 'DST', productType: 'Bulk', unit: 'Pcs' };
+  const db = mockDatabase([[{ id: 17 }], [{ id: 3 }], [receipt], [transfer], [product], [receipt], [], []]);
   await withApi(db, async (request) => {
     const created = await request('/api/transactions/receiving', {
       productId: 17, receivingDate: '2026-10-17', quantity: 5, location: ' A2C ', makReleaseNumber: ' RN-001 ', materialLotNumber: ' MAT-001 ',
@@ -598,12 +624,13 @@ test('receiving persists independent MAK Release Number and material lot values 
     assert.equal(db.calls[1].parameters.materialLotNumber[1], 'MAT-001');
     assert.match(db.calls[1].statement, /@location, @materialLotNumber, @makReleaseNumber/);
     const recent = await request('/api/transactions/receiving');
-    assert.deepEqual(recent.body, [receipt]);
+    assert.deepEqual(recent.body, [transfer, receipt]);
     assert.match(db.calls[2].statement, /t\.location, t\.mak_release_number AS makReleaseNumber/);
+    assert.match(db.calls[3].statement, /destination_material_lot_number AS materialLotNumber/);
     const history = await request('/api/products/17/history');
     assert.deepEqual(history.body.receiving, [receipt]);
-    assert.match(db.calls[4].statement, /SELECT id, CONVERT\(char\(10\), receiving_date, 23\) AS \[date\], location/);
-    assert.match(db.calls[4].statement, /mak_release_number AS makReleaseNumber/);
+    assert.match(db.calls[5].statement, /SELECT id, CONVERT\(char\(10\), receiving_date, 23\) AS \[date\], location/);
+    assert.match(db.calls[5].statement, /mak_release_number AS makReleaseNumber/);
   });
 });
 

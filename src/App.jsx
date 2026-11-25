@@ -160,18 +160,28 @@ function App() {
 
   const performDashboardExport = async ({ fromDate, toDate }) => {
     const range = { fromDate, toDate };
+    const fetchForExport = async (label, url) => {
+      try {
+        return await api(url);
+      } catch (error) {
+        throw new Error(`${label}: ${error?.message || 'request failed.'}`);
+      }
+    };
     if (exportInProgress.current) return;
     exportInProgress.current = true;
     setExporting(true);
     try {
       if (exportRequest?.typeId) {
-        const report = await api(`/api/product-types/${encodeURIComponent(exportRequest.typeId)}/history`);
+        const report = await fetchForExport('Product-type history request failed',
+          `/api/product-types/${encodeURIComponent(exportRequest.typeId)}/history`);
         const filteredReport = filterTypeHistoryReport(report, range);
         await exportTypeHistoryWorkbook(filteredReport);
         setMessage({ kind: 'success', text: `${report.type.name} product history workbook downloaded.` });
       } else {
         const [receiving, usage, shipmentRows] = await Promise.all([
-          api('/api/transactions/receiving'), api('/api/transactions/usage'), api('/api/shipments'),
+          fetchForExport('Receiving history request failed', '/api/transactions/receiving'),
+          fetchForExport('Usage history request failed', '/api/transactions/usage'),
+          fetchForExport('Shipment log request failed', '/api/shipments'),
         ]);
         await exportInventoryWorkbook(allProducts, types, {
           receiving: receiving.filter((row) => inExportDateRange(row, range)),

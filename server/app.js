@@ -292,8 +292,7 @@ export function createApp(db = database, {
     if (!['receiving', 'usage'].includes(kind)) return fail(res, 404, 'Transaction type not found.');
     const table = kind === 'receiving' ? 'receiving_transactions' : 'usage_transactions';
     const dateColumn = kind === 'receiving' ? 'receiving_date' : 'usage_date';
-    const transferRows = kind === 'receiving' ? `
-      UNION ALL
+    const transferQuery = kind === 'receiving' ? `
       SELECT -tr.id AS id, tr.destination_product_id AS productId,
              CONVERT(char(10), tr.transfer_date, 23) AS [date], tr.quantity,
              tr.destination_material_lot_number AS materialLotNumber, CAST(NULL AS NVARCHAR(50)) AS location,
@@ -305,7 +304,6 @@ export function createApp(db = database, {
       JOIN dbo.products sp ON sp.id = tr.source_product_id
       WHERE tr.company_id = @companyId
     ` : `
-      UNION ALL
       SELECT -tr.id AS id, tr.source_product_id AS productId,
              CONVERT(char(10), tr.transfer_date, 23) AS [date], tr.quantity,
              tr.source_material_lot_number AS materialLotNumber, tr.destination_mak_lot_number AS makLotNumber,
@@ -316,6 +314,7 @@ export function createApp(db = database, {
       JOIN dbo.products dp ON dp.id = tr.destination_product_id
       WHERE tr.company_id = @companyId
     `;
+    const inputs = { companyId: [sql.Int, req.company.id] };
     const result = await db.query(`
       SELECT t.id, t.product_id AS productId, CONVERT(char(10), t.${dateColumn}, 23) AS [date],
              t.quantity, t.material_lot_number AS materialLotNumber,
@@ -324,10 +323,12 @@ export function createApp(db = database, {
       FROM dbo.${table} t JOIN dbo.products p ON p.id = t.product_id
       JOIN dbo.product_types pt ON pt.id = p.product_type_id AND pt.company_id = p.company_id
       WHERE p.company_id = @companyId
-      ${transferRows}
       ORDER BY [date] DESC, id DESC
-    `, { companyId: [sql.Int, req.company.id] });
-    res.json(result.recordset);
+    `, inputs);
+    const transfers = await db.query(transferQuery, inputs);
+    const rows = [...result.recordset, ...transfers.recordset]
+      .sort((left, right) => right.date.localeCompare(left.date) || Number(right.id) - Number(left.id));
+    res.json(rows);
   }));
   app.post('/api/transactions/receiving', route(async (req, res) => {
     // Preserve submissions from forms cached before the release-number rename.
@@ -481,7 +482,9 @@ export function createApp(db = database, {
     res.status(201).json(result);
   }));
   app.get('/api/shipments', route(async (req, res) => {
-    const result = await db.query(`
+    let result;
+    try {
+      result = await db.query(`
       SELECT s.id, CONVERT(char(10), s.shipment_date, 23) AS [date], s.quantity,
              s.source_material_lot_number AS sourceMaterialLotNumber,
              fp.id AS finishedProductId, fp.name AS finishedProductName, fp.item_code AS finishedItemCode, fp.mak_item_code AS finishedMakItemCode,
@@ -493,7 +496,13 @@ export function createApp(db = database, {
       LEFT JOIN dbo.app_users u ON u.id = s.added_by_user_id
       WHERE s.company_id = @companyId
       ORDER BY s.shipment_date DESC, s.id DESC
-    `, { companyId: [sql.Int, req.company.id] });
+      `, { companyId: [sql.Int, req.company.id] });
+    } catch (error) {
+      if ([207, 208].includes(error.number)) {
+        return fail(res, 503, 'Shipment database schema is incomplete. Run scripts/inventory-shipments.sql, then restart the app.');
+      }
+      throw error;
+    }
     res.json(result.recordset);
   }));
   app.put('/api/transactions/:kind/:id', route(async (req, res) => {
@@ -703,10 +712,12 @@ export function createApp(db = database, {
       app.get('*', (_req, res) => res.sendFile(path.join(clientDirectory, 'index.html')));
     } else app.get('/', (_req, res) => res.redirect('http://localhost:5173/'));
   }
-  app.use((error, _req, res, _next) => {
-    console.error('Inventory API error:', error.code || error.number || error.name);
+  app.use((error, req, res, _next) => {
+    console.error('Inventory API error:', req.method, req.path, error.code || error.name,
+      error.number ? `SQL ${error.number}` : '');
     if (error.status === 503) return fail(res, 503, error.message);
     if (error.code === 'ETIMEOUT') return fail(res, 503, connectionFailure(error).message);
+    if ([207, 208].includes(error.number)) return fail(res, 503, 'The database is missing a required table or column. Apply the latest SQL migrations and restart the app.');
     if (error.type === 'entity.parse.failed') return fail(res, 400, 'Invalid JSON request.');
     if ([2628, 8152].includes(error.number)) return fail(res, 400, 'A value exceeds the configured database field length.');
     return fail(res, 500, 'An unexpected server error occurred.');
