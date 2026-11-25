@@ -9,6 +9,7 @@ import { mountUserAdministration } from './users.js';
 import { mountCompanyAdministration } from './companies.js';
 import { mountAuditLog } from './audit.js';
 import { mountLotInventory } from './lot-inventory.js';
+import { isFinishedGoodsType } from '../src/lib/product-type.js';
 
 const productSelect = `
   SELECT p.id, p.product_type_id AS productTypeId, pt.name AS productType,
@@ -29,11 +30,17 @@ const productSelect = `
 const lotWhitespace = '\u0009\u000a\u000b\u000c\u000d\u0020\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff';
 const materialLotsSelect = `
   WITH received AS (
-    SELECT TRIM(@lotWhitespace FROM material_lot_number) COLLATE Latin1_General_100_BIN2 AS materialLotNumber,
-           SUM(quantity) AS quantity
-    FROM dbo.receiving_transactions
-    WHERE product_id = @productId AND material_lot_number IS NOT NULL
-    GROUP BY TRIM(@lotWhitespace FROM material_lot_number) COLLATE Latin1_General_100_BIN2
+    SELECT materialLotNumber, SUM(quantity) AS quantity
+    FROM (
+      SELECT TRIM(@lotWhitespace FROM material_lot_number) COLLATE Latin1_General_100_BIN2 AS materialLotNumber, quantity
+      FROM dbo.receiving_transactions
+      WHERE product_id = @productId AND material_lot_number IS NOT NULL
+      UNION ALL
+      SELECT TRIM(@lotWhitespace FROM destination_material_lot_number) COLLATE Latin1_General_100_BIN2, quantity
+      FROM dbo.inventory_transfers
+      WHERE destination_product_id = @productId AND destination_material_lot_number IS NOT NULL
+    ) receiptsAndTransfers
+    GROUP BY materialLotNumber
   ), used AS (
     SELECT materialLotNumber, SUM(quantity) AS quantity
     FROM (
@@ -58,7 +65,7 @@ const transferLotsSelect = `
            quantity AS received, CAST(0 AS float) AS used
     FROM dbo.receiving_transactions WHERE product_id = @productId
     UNION ALL
-    SELECT CAST(NULL AS NVARCHAR(255)), quantity, CAST(0 AS float)
+    SELECT destination_material_lot_number, quantity, CAST(0 AS float)
     FROM dbo.inventory_transfers WHERE destination_product_id = @productId
     UNION ALL
     SELECT TRIM(@lotWhitespace FROM material_lot_number) COLLATE Latin1_General_100_BIN2,
@@ -208,7 +215,9 @@ export function createApp(db = database, {
     `, inputs);
     const transfers = await db.query(`
       SELECT t.id, CONVERT(char(10), t.transfer_date, 23) AS [date], t.quantity,
-             t.source_material_lot_number AS sourceMaterialLotNumber, t.destination_mak_lot_number AS destinationMakLotNumber,
+             t.source_material_lot_number AS sourceMaterialLotNumber,
+             t.destination_material_lot_number AS destinationMaterialLotNumber,
+             t.destination_mak_lot_number AS destinationMakLotNumber,
              t.source_product_id AS sourceProductId, sp.name AS sourceProductName, sp.item_code AS sourceItemCode, sp.mak_item_code AS sourceMakItemCode,
              t.destination_product_id AS destinationProductId, dp.name AS destinationProductName, dp.item_code AS destinationItemCode, dp.mak_item_code AS destinationMakItemCode,
              u.display_name AS addedBy
@@ -287,7 +296,7 @@ export function createApp(db = database, {
       UNION ALL
       SELECT -tr.id AS id, tr.destination_product_id AS productId,
              CONVERT(char(10), tr.transfer_date, 23) AS [date], tr.quantity,
-             CAST(NULL AS NVARCHAR(255)) AS materialLotNumber, CAST(NULL AS NVARCHAR(50)) AS location,
+             tr.destination_material_lot_number AS materialLotNumber, CAST(NULL AS NVARCHAR(50)) AS location,
              tr.destination_mak_lot_number AS makReleaseNumber,
              CONCAT(N'Transfer from ', sp.name, N' (', COALESCE(NULLIF(sp.mak_item_code, N''), sp.item_code), N')') AS remarks,
              dp.name AS productName, dp.item_code AS itemCode, dpt.name AS productType, dp.unit
@@ -368,6 +377,124 @@ export function createApp(db = database, {
     });
     if (result.error) return fail(res, result.status, result.error);
     res.status(201).json(result);
+  }));
+  app.post('/api/transactions/shipping', route(async (req, res) => {
+    const body = req.body || {};
+    if (!validId(body.productId)) return fail(res, 400, 'Select a valid Finished Product.');
+    if (!Object.hasOwn(body, 'sourceMaterialLotNumber') || !optionalText(body.sourceMaterialLotNumber)
+        || (body.sourceMaterialLotNumber !== null && !requiredText(body.sourceMaterialLotNumber))
+        || tooLong(body.sourceMaterialLotNumber, 255)) return fail(res, 400, 'Select a valid material lot.');
+    if (!requiredText(body.shipmentDate) || !/^\d{4}-\d{2}-\d{2}$/.test(body.shipmentDate)
+        || !Number.isFinite(Date.parse(`${body.shipmentDate}T00:00:00Z`))
+        || new Date(`${body.shipmentDate}T00:00:00Z`).toISOString().slice(0, 10) !== body.shipmentDate) return fail(res, 400, 'Enter a valid shipment date.');
+    if (typeof body.quantity !== 'number' || !Number.isFinite(body.quantity) || body.quantity <= 0) return fail(res, 400, 'Quantity must be greater than zero.');
+
+    const result = await db.transaction(async (executor) => {
+      if (!await lockProduct(body.productId, req.company.id, executor)) return { status: 404, error: 'Product not found in the selected company.' };
+      const product = await getProduct(body.productId, req.company.id, executor);
+      if (!isFinishedGoodsType(product.productType)) {
+        return { status: 400, error: 'Only Finished Goods or Finished Product items can be shipped.' };
+      }
+
+      if (body.quantity > Number(product.availableBalance)) {
+        return { status: 400, error: `Insufficient inventory. Available: ${product.availableBalance} ${product.unit}.` };
+      }
+      const lots = await getTransferLots(body.productId, executor);
+      const lotTotal = lots.reduce((total, lot) => total + Number(lot.availableQuantity), 0);
+      if (Math.abs(lotTotal - Number(product.availableBalance)) > Math.max(1, lotTotal) * 1e-9) {
+        return { status: 400, error: 'The finished-goods lot balances do not match the available product balance. Refresh inventory before shipping.' };
+      }
+      const sourceLot = body.sourceMaterialLotNumber?.trim() || null;
+      const selectedLot = lots.find((lot) => (lot.materialLotNumber?.trim() || null) === sourceLot);
+      const lotBalance = Number(selectedLot?.availableQuantity || 0);
+      if (!selectedLot) {
+        return { status: 400, error: 'Select a lot with available inventory for this SKU.' };
+      }
+      if (body.quantity > lotBalance) {
+        return { status: 400, error: `Insufficient inventory in selected lot. Available: ${lotBalance} ${product.unit}.` };
+      }
+
+      const shippedTypeResult = await db.query(`
+        SELECT TOP (1) id FROM dbo.product_types WITH (UPDLOCK, HOLDLOCK)
+        WHERE company_id = @companyId AND LOWER(LTRIM(RTRIM(name))) = N'shipped products'
+      `, { companyId: [sql.Int, req.company.id] }, executor);
+      let shippedTypeId = shippedTypeResult.recordset[0]?.id;
+      if (!shippedTypeId) {
+        const insertedType = await db.query(`
+          INSERT INTO dbo.product_types (name, company_id, created_at)
+          OUTPUT INSERTED.id
+          VALUES (N'Shipped Products', @companyId, SYSUTCDATETIME())
+        `, { companyId: [sql.Int, req.company.id] }, executor);
+        shippedTypeId = insertedType.recordset[0].id;
+      }
+
+      const makItemCode = product.makItemCode?.trim() || '';
+      const shippedProductInputs = {
+        productTypeId: [sql.Int, shippedTypeId], companyId: [sql.Int, req.company.id],
+        makItemCode: [sql.NVarChar(255), makItemCode], itemCode: [sql.NVarChar(255), product.itemCode],
+        name: [sql.NVarChar(sql.MAX), product.name], unit: [sql.NVarChar(50), product.unit],
+        comment: [sql.NVarChar(sql.MAX), product.comment || ''],
+      };
+      const shippedProductResult = await db.query(`
+        SELECT TOP (1) id FROM dbo.products WITH (UPDLOCK, HOLDLOCK)
+        WHERE company_id = @companyId AND product_type_id = @productTypeId
+          AND ${makItemCode ? 'mak_item_code = @makItemCode' : 'item_code = @itemCode AND name = @name'}
+        ORDER BY id
+      `, shippedProductInputs, executor);
+      let shippedProductId = shippedProductResult.recordset[0]?.id;
+      const shippedProductCreated = !shippedProductId;
+      if (!shippedProductId) {
+        const insertedProduct = await db.query(`
+          INSERT INTO dbo.products
+            (product_type_id, company_id, name, item_code, mak_item_code, unit, comment, created_at, updated_at)
+          OUTPUT INSERTED.id
+          VALUES (@productTypeId, @companyId, @name, @itemCode, @makItemCode, @unit, @comment, SYSUTCDATETIME(), SYSUTCDATETIME())
+        `, shippedProductInputs, executor);
+        shippedProductId = insertedProduct.recordset[0].id;
+      }
+      const usage = await db.query(`
+        INSERT INTO dbo.usage_transactions
+          (product_id, usage_date, quantity, material_lot_number, mak_lot_number, remarks, added_by_user_id, created_at)
+        OUTPUT INSERTED.id
+        VALUES (@productId, @date, @quantity, @materialLotNumber, N'SHIPPED', N'Shipped', @addedByUserId, SYSUTCDATETIME())
+      `, {
+        productId: [sql.Int, Number(body.productId)], date: [sql.Date, new Date(`${body.shipmentDate}T00:00:00Z`)],
+        quantity: [sql.Float, body.quantity], materialLotNumber: [sql.NVarChar(255), sourceLot],
+        addedByUserId: [sql.Int, req.user.id],
+      }, executor);
+      const shipment = await db.query(`
+        INSERT INTO dbo.inventory_shipments
+          (company_id, finished_product_id, shipped_product_id, shipment_date, quantity, source_material_lot_number, added_by_user_id)
+        OUTPUT INSERTED.id
+        VALUES (@companyId, @finishedProductId, @shippedProductId, @shipmentDate, @quantity, @sourceMaterialLotNumber, @addedByUserId)
+      `, {
+        companyId: [sql.Int, req.company.id], finishedProductId: [sql.Int, Number(body.productId)],
+        shippedProductId: [sql.Int, Number(shippedProductId)], shipmentDate: [sql.Date, new Date(`${body.shipmentDate}T00:00:00Z`)],
+        quantity: [sql.Float, body.quantity], sourceMaterialLotNumber: [sql.NVarChar(255), sourceLot], addedByUserId: [sql.Int, req.user.id],
+      }, executor);
+      return { status: 201, id: shipment.recordset[0].id, usageIds: [usage.recordset[0].id],
+        sourceMaterialLotNumber: sourceLot,
+        shippedProductId: Number(shippedProductId), shippedProductCreated,
+        product: await getProduct(body.productId, req.company.id, executor) };
+    });
+    if (result.error) return fail(res, result.status, result.error);
+    res.status(201).json(result);
+  }));
+  app.get('/api/shipments', route(async (req, res) => {
+    const result = await db.query(`
+      SELECT s.id, CONVERT(char(10), s.shipment_date, 23) AS [date], s.quantity,
+             s.source_material_lot_number AS sourceMaterialLotNumber,
+             fp.id AS finishedProductId, fp.name AS finishedProductName, fp.item_code AS finishedItemCode, fp.mak_item_code AS finishedMakItemCode,
+             sp.id AS shippedProductId, sp.name AS shippedProductName, sp.item_code AS shippedItemCode, sp.mak_item_code AS shippedMakItemCode, sp.unit AS shippedUnit,
+             u.display_name AS addedBy
+      FROM dbo.inventory_shipments s
+      JOIN dbo.products fp ON fp.id = s.finished_product_id AND fp.company_id = s.company_id
+      JOIN dbo.products sp ON sp.id = s.shipped_product_id AND sp.company_id = s.company_id
+      LEFT JOIN dbo.app_users u ON u.id = s.added_by_user_id
+      WHERE s.company_id = @companyId
+      ORDER BY s.shipment_date DESC, s.id DESC
+    `, { companyId: [sql.Int, req.company.id] });
+    res.json(result.recordset);
   }));
   app.put('/api/transactions/:kind/:id', route(async (req, res) => {
     if (!req.user?.isAdmin) return fail(res, 403, 'Administrator access is required to edit transactions.');
@@ -457,17 +584,9 @@ export function createApp(db = database, {
     const body = req.body || {};
     if (!validId(body.sourceProductId) || !validId(body.destinationProductId)) return fail(res, 400, 'Select valid source and destination products.');
     if (Number(body.sourceProductId) === Number(body.destinationProductId)) return fail(res, 400, 'Source and destination products must be different.');
-    if (!requiredText(body.destinationMakLotNumber) || tooLong(body.destinationMakLotNumber, 255)) return fail(res, 400, 'Destination MAK lot number is required and must be 255 characters or fewer.');
-    if (!optionalText(body.sourceMaterialLotNumber) || tooLong(body.sourceMaterialLotNumber, 255)) return fail(res, 400, 'Source material lot must be 255 characters or fewer.');
-    if (!requiredText(body.transferDate) || !/^\d{4}-\d{2}-\d{2}$/.test(body.transferDate)
-        || !Number.isFinite(Date.parse(`${body.transferDate}T00:00:00Z`))
-        || new Date(`${body.transferDate}T00:00:00Z`).toISOString().slice(0, 10) !== body.transferDate) return fail(res, 400, 'Enter a valid transfer date.');
-    if (typeof body.quantity !== 'number' || !Number.isFinite(body.quantity) || body.quantity <= 0) return fail(res, 400, 'Quantity must be greater than zero.');
 
     const sourceProductId = Number(body.sourceProductId);
     const destinationProductId = Number(body.destinationProductId);
-    const sourceLot = body.sourceMaterialLotNumber?.trim() || null;
-    const destinationMakLotNumber = body.destinationMakLotNumber.trim();
     const result = await db.transaction(async (executor) => {
       for (const productId of [sourceProductId, destinationProductId].sort((a, b) => a - b)) {
         if (!await lockProduct(productId, req.company.id, executor)) return { status: 404, error: 'Product not found in the selected company.' };
@@ -479,33 +598,35 @@ export function createApp(db = database, {
       if (canonicalUnit(source.unit) !== canonicalUnit(destination.unit)) {
         return { status: 400, error: 'Source and destination products must use compatible units.' };
       }
-      if (body.quantity > Number(source.availableBalance)) {
-        return { status: 400, error: `Insufficient source inventory. Available: ${source.availableBalance} ${source.unit}.` };
-      }
       const lots = await getTransferLots(sourceProductId, executor);
-      const lot = lots.find((item) => (item.materialLotNumber == null ? null : item.materialLotNumber.trim()) === sourceLot);
-      const lotBalance = Number(lot?.availableQuantity || 0);
-      if (body.quantity > lotBalance) {
-        return { status: 400, error: `Insufficient source lot inventory. Available: ${lotBalance} ${source.unit}.` };
+      const quantity = lots.reduce((total, lot) => total + Number(lot.availableQuantity), 0);
+      if (quantity <= 0 || Math.abs(quantity - Number(source.availableBalance)) > Math.max(1, quantity) * 1e-9) {
+        return { status: 400, error: 'The source lot balances do not match the available product balance. Refresh inventory before transferring.' };
       }
-      const inserted = await db.query(`
-        INSERT INTO dbo.inventory_transfers
-          (company_id, source_product_id, destination_product_id, source_material_lot_number,
-           destination_mak_lot_number, transfer_date, quantity, added_by_user_id)
-        OUTPUT INSERTED.id
-        VALUES (@companyId, @sourceProductId, @destinationProductId, @sourceMaterialLotNumber,
-                @destinationMakLotNumber, @transferDate, @quantity, @addedByUserId)
-      `, {
-        companyId: [sql.Int, req.company.id], sourceProductId: [sql.Int, sourceProductId],
-        destinationProductId: [sql.Int, destinationProductId], sourceMaterialLotNumber: [sql.NVarChar(255), sourceLot],
-        destinationMakLotNumber: [sql.NVarChar(255), destinationMakLotNumber],
-        transferDate: [sql.Date, new Date(`${body.transferDate}T00:00:00Z`)], quantity: [sql.Float, body.quantity],
-        addedByUserId: [sql.Int, req.user.id],
-      }, executor);
-      return { id: inserted.recordset[0].id, sourceProductId, destinationProductId, sourceLot, destinationMakLotNumber };
+      const transferDate = new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`);
+      const ids = [];
+      for (const lot of lots) {
+        const inserted = await db.query(`
+          INSERT INTO dbo.inventory_transfers
+            (company_id, source_product_id, destination_product_id, source_material_lot_number,
+             destination_material_lot_number, destination_mak_lot_number, transfer_date, quantity, added_by_user_id)
+          OUTPUT INSERTED.id
+          VALUES (@companyId, @sourceProductId, @destinationProductId, @sourceMaterialLotNumber,
+                  @destinationMaterialLotNumber, @destinationMakLotNumber, @transferDate, @quantity, @addedByUserId)
+        `, {
+          companyId: [sql.Int, req.company.id], sourceProductId: [sql.Int, sourceProductId],
+          destinationProductId: [sql.Int, destinationProductId], sourceMaterialLotNumber: [sql.NVarChar(255), lot.materialLotNumber],
+          destinationMaterialLotNumber: [sql.NVarChar(255), lot.materialLotNumber],
+          destinationMakLotNumber: [sql.NVarChar(255), destination.makItemCode || destination.itemCode],
+          transferDate: [sql.Date, transferDate], quantity: [sql.Float, Number(lot.availableQuantity)],
+          addedByUserId: [sql.Int, req.user.id],
+        }, executor);
+        ids.push(inserted.recordset[0].id);
+      }
+      return { ids, sourceProductId, destinationProductId, quantity };
     });
     if (result.error) return fail(res, result.status, result.error);
-    res.status(201).json(result);
+    res.status(201).json({ ...result, id: result.ids[0] });
   }));
   app.get('/api/products/:id/transfers', route(async (req, res) => {
     if (!validId(req.params.id)) return fail(res, 404, 'Product not found.');
@@ -514,6 +635,7 @@ export function createApp(db = database, {
     const result = await db.query(`
       SELECT t.id, CONVERT(char(10), t.transfer_date, 23) AS [date], t.quantity,
              t.source_material_lot_number AS sourceMaterialLotNumber,
+             t.destination_material_lot_number AS destinationMaterialLotNumber,
              t.destination_mak_lot_number AS destinationMakLotNumber,
              sp.id AS sourceProductId, sp.name AS sourceProductName, sp.item_code AS sourceItemCode, sp.mak_item_code AS sourceMakItemCode,
              dp.id AS destinationProductId, dp.name AS destinationProductName, dp.item_code AS destinationItemCode, dp.mak_item_code AS destinationMakItemCode,
@@ -545,7 +667,9 @@ export function createApp(db = database, {
     `, inputs);
     const transfers = await db.query(`
       SELECT t.id, CONVERT(char(10), t.transfer_date, 23) AS [date], t.quantity,
-             t.source_material_lot_number AS sourceMaterialLotNumber, t.destination_mak_lot_number AS destinationMakLotNumber,
+             t.source_material_lot_number AS sourceMaterialLotNumber,
+             t.destination_material_lot_number AS destinationMaterialLotNumber,
+             t.destination_mak_lot_number AS destinationMakLotNumber,
              t.source_product_id AS sourceProductId, sp.name AS sourceProductName, sp.item_code AS sourceItemCode, sp.mak_item_code AS sourceMakItemCode,
              t.destination_product_id AS destinationProductId, dp.name AS destinationProductName, dp.item_code AS destinationItemCode, dp.mak_item_code AS destinationMakItemCode,
              u.display_name AS addedBy,

@@ -9,7 +9,8 @@ function transactionDate(value) {
   return date;
 }
 
-function usedAgainst(value) {
+function usedAgainst(value, remarks) {
+  if (value === 'SHIPPED' && remarks === 'Shipped') return 'Shipped';
   const lot = String(value ?? '').trim().replace(/^(?:lot\s*#\s*|#+\s*)+/i, '').trim();
   return lot ? `#${lot}` : '';
 }
@@ -27,12 +28,13 @@ export function productHistoryEntries(history) {
     const incoming = transfer.direction === 'in';
     const otherProduct = incoming ? transfer.sourceProductName : transfer.destinationProductName;
     const otherCode = incoming ? transfer.sourceItemCode : transfer.destinationItemCode;
-    const remarks = `Inventory transfer #${transfer.id}: ${incoming ? 'from' : 'to'} ${otherProduct} (${otherCode}); destination MAK lot ${transfer.destinationMakLotNumber}${transfer.addedBy ? `; added by ${transfer.addedBy}` : ''}.`;
+    const destinationMakItemCode = transfer.destinationMakItemCode || transfer.destinationMakLotNumber || '';
+    const remarks = `Inventory transfer #${transfer.id}: ${incoming ? 'from' : 'to'} ${otherProduct} (${otherCode}); destination MAK Item Code ${destinationMakItemCode}${transfer.addedBy ? `; added by ${transfer.addedBy}` : ''}.`;
     return {
       row: {
         id: -Math.abs(Number(transfer.id)), date: transfer.date, quantity: transfer.quantity,
-        materialLotNumber: incoming ? null : transfer.sourceMaterialLotNumber,
-        location: '', makReleaseNumber: '', makLotNumber: transfer.destinationMakLotNumber,
+        materialLotNumber: incoming ? transfer.destinationMaterialLotNumber : transfer.sourceMaterialLotNumber,
+        location: '', makReleaseNumber: '', makLotNumber: destinationMakItemCode,
         remarks, transfer: true,
       },
       receiving: incoming, transfer: true, otherProduct, date: transactionDate(transfer.date),
@@ -50,11 +52,11 @@ export function productHistoryEntries(history) {
         materialLotNumber: String(row.materialLotNumber ?? '').trim() || (receiving ? '' : 'N/A'),
         location: receiving ? String(row.location ?? '').trim() : '',
         releaseNumber: receiving ? String(row.makReleaseNumber ?? '') : '',
-        description: transfer ? `${receiving ? 'Transfer in from' : 'Transfer out to'} ${otherProduct} · MAK lot ${row.makLotNumber}`
+        description: transfer ? `${receiving ? 'Transfer in from' : 'Transfer out to'} ${otherProduct} · MAK Item Code ${row.makLotNumber}`
           : receiving ? String(history.product.name ?? '') : '',
         receivedQuantity: receiving ? amount : null,
         usedQuantity: receiving ? null : amount,
-        usedAgainst: receiving ? '' : usedAgainst(row.makLotNumber),
+        usedAgainst: receiving ? '' : usedAgainst(row.makLotNumber, row.remarks),
         notes: [
           !transfer && receiving && row.makReleaseNumber ? `MAK Release Number: ${row.makReleaseNumber}` : '',
           row.materialLotNumber ? `Material lot number: ${row.materialLotNumber}` : '',

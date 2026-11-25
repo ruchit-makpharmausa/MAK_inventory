@@ -20,7 +20,7 @@ const inventorySelect = `
            CAST(0 AS float), t.quantity
     FROM dbo.inventory_transfers t WHERE t.company_id = @companyId
     UNION ALL
-    SELECT t.destination_product_id AS productId, CAST(NULL AS NVARCHAR(255)),
+    SELECT t.destination_product_id AS productId, t.destination_material_lot_number,
            t.quantity, CAST(0 AS float)
     FROM dbo.inventory_transfers t WHERE t.company_id = @companyId
   ), buckets AS (

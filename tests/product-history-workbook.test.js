@@ -74,19 +74,20 @@ test('product history exports transfer-in and transfer-out quantities as explici
     product,
     receiving: [], usage: [],
     transfers: [
-      { id: 8, direction: 'in', date: '2026-10-12', quantity: 4, sourceProductName: 'Source item', sourceItemCode: 'SRC', destinationMakLotNumber: 'TRV-LOT-8', addedBy: 'Admin' },
-      { id: 9, direction: 'out', date: '2026-10-13', quantity: 2, sourceMaterialLotNumber: 'SRC-LOT', destinationProductName: 'Target item', destinationItemCode: 'DST', destinationMakLotNumber: 'TRV-LOT-9', addedBy: 'Admin' },
+      { id: 8, direction: 'in', date: '2026-10-12', quantity: 4, sourceProductName: 'Source item', sourceItemCode: 'SRC', destinationMaterialLotNumber: 'LOT-8', destinationMakItemCode: 'MAK-8', addedBy: 'Admin' },
+      { id: 9, direction: 'out', date: '2026-10-13', quantity: 2, sourceMaterialLotNumber: 'SRC-LOT', destinationProductName: 'Target item', destinationItemCode: 'DST', destinationMakItemCode: 'MAK-9', addedBy: 'Admin' },
     ],
   };
   const workbook = await roundTrip(history);
   const sheet = workbook.worksheets[0];
-  assert.equal(sheet.getCell('D2').value, 'Transfer in from Source item · MAK lot TRV-LOT-8');
+  assert.equal(sheet.getCell('B2').value, 'LOT-8');
+  assert.equal(sheet.getCell('D2').value, 'Transfer in from Source item · MAK Item Code MAK-8');
   assert.equal(sheet.getCell('E2').value, 4);
-  assert.equal(sheet.getCell('D3').value, 'Transfer out to Target item · MAK lot TRV-LOT-9');
+  assert.equal(sheet.getCell('D3').value, 'Transfer out to Target item · MAK Item Code MAK-9');
   assert.equal(sheet.getCell('F3').value, 2);
-  assert.equal(sheet.getCell('G3').value, '#TRV-LOT-9');
-  assert.match(noteText(sheet.getCell('D2')), /Inventory transfer #8/);
-  assert.match(noteText(sheet.getCell('G3')), /Inventory transfer #9/);
+  assert.equal(sheet.getCell('G3').value, '#MAK-9');
+  assert.match(noteText(sheet.getCell('D2')), /destination MAK Item Code MAK-8/);
+  assert.match(noteText(sheet.getCell('G3')), /destination MAK Item Code MAK-9/);
 });
 
 test('same-day transactions are stable, quantities stay numeric, and lot prefixes are not duplicated', async () => {
@@ -122,6 +123,13 @@ test('empty histories and missing optional metadata still export correctly', asy
   assert.equal(empty.worksheets[0].rowCount, 1);
   const missing = await roundTrip({ product: { name: 'Product' }, receiving: [], usage: [usage({ makLotNumber: null, remarks: null })] });
   assert.equal(missing.worksheets[0].getCell('G2').text, '');
+});
+
+test('shipments are identified as shipped inventory in product history exports', async () => {
+  const history = { product, receiving: [], usage: [usage({ makLotNumber: 'SHIPPED', remarks: 'Shipped' })] };
+  const entry = productHistoryEntries(history)[0];
+  assert.equal(entry.usedAgainst, 'Shipped');
+  assert.equal(entry.notes, 'Material lot number: USE-MAT-001\nRemarks: Shipped');
 });
 
 test('material lots map to one column with N/A only for missing usage lots', async () => {

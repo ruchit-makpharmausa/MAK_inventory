@@ -22,6 +22,13 @@ const normalizedLot = (value) => value == null || !String(value).trim() ? null :
 const productId = (product, index) => product.id == null ? `missing:${index}` : String(product.id);
 const balanceNumberFormat = '#,##0';
 
+function shipmentDate(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error('Shipment history contains an invalid date.');
+  const date = new Date(`${value}T00:00:00Z`);
+  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value) throw new Error('Shipment history contains an invalid date.');
+  return date;
+}
+
 function productLots(products, receivingRows, usageRows) {
   const quantities = new Map();
   for (const [rows, field] of [[receivingRows, 'received'], [usageRows, 'used']]) {
@@ -44,6 +51,7 @@ function productLots(products, receivingRows, usageRows) {
       } else current.used += amount;
       lots.set(key, current);
     }
+
   }
 
   return sortProducts(products).flatMap((product, index) => {
@@ -86,6 +94,38 @@ function productLots(products, receivingRows, usageRows) {
       });
     });
   });
+}
+
+function addShipmentLogSheet(workbook, shipments, usedNames) {
+  if (!shipments.length) return;
+  const headers = ['Shipment Date', 'Finished Product', 'Finished MAK Item Code', 'Finished Item Code', 'Material Lot',
+    'Shipped Product', 'Shipped MAK Item Code', 'Shipped Item Code', 'Quantity Shipped', 'Unit', 'Shipped By'];
+  const widths = [16, 34, 24, 22, 24, 34, 24, 22, 20, 12, 24];
+  const sheet = workbook.addWorksheet(worksheetName('Shipment Log', usedNames), {
+    views: [{ state: 'frozen', ySplit: 1 }],
+  });
+  sheet.columns = headers.map((header, index) => ({ header, width: widths[index] }));
+  sheet.getColumn(1).numFmt = 'm/d/yy';
+  sheet.getColumn(9).numFmt = balanceNumberFormat;
+  for (const column of [2, 3, 4, 5, 6, 7, 8, 10, 11]) sheet.getColumn(column).alignment = { wrapText: true, vertical: 'middle' };
+  sheet.getColumn(9).alignment = { horizontal: 'right', vertical: 'middle' };
+  for (const shipment of shipments) {
+    const row = sheet.addRow([
+      shipmentDate(shipment.date), String(shipment.finishedProductName ?? ''), String(shipment.finishedMakItemCode ?? ''),
+      String(shipment.finishedItemCode ?? ''), String(shipment.sourceMaterialLotNumber ?? '').trim() || 'Unassigned (N/A)',
+      String(shipment.shippedProductName ?? ''), String(shipment.shippedMakItemCode ?? ''), String(shipment.shippedItemCode ?? ''),
+      numericQuantity(shipment.quantity), String(shipment.shippedUnit ?? ''), String(shipment.addedBy ?? ''),
+    ]);
+    row.font = { name: 'Calibri', size: 12 };
+    row.height = 24;
+  }
+  sheet.getRow(1).height = 36;
+  sheet.getRow(1).eachCell((cell) => {
+    cell.font = { name: 'Calibri', size: 12, bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF102B4E' } };
+    cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+  });
+  sheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: sheet.rowCount, column: headers.length } };
 }
 
 export async function createInventoryWorkbook(products, types = [], transactions = {}) {
@@ -161,6 +201,7 @@ export async function createInventoryWorkbook(products, types = [], transactions
     });
     sheet.autoFilter = { from: { row: 1, column: 1 }, to: { row: sheet.rowCount, column: sheetColumns.length } };
   }
+  addShipmentLogSheet(workbook, transactions.shipments || [], usedNames);
   return workbook;
 }
 

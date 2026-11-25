@@ -1,6 +1,8 @@
 export const inventoryHistoryRows = (history) => [
   ...history.receiving.map((row) => ['Receiving', row.date, row.location, row.makReleaseNumber, '', row.quantity, row.remarks]),
-  ...history.usage.map((row) => ['Usage', row.date, '', '', row.makLotNumber, row.quantity, row.remarks]),
+  ...history.usage.map((row) => row.makLotNumber === 'SHIPPED' && row.remarks === 'Shipped'
+    ? ['Shipment', row.date, '', '', '', row.quantity, row.remarks]
+    : ['Usage', row.date, '', '', row.makLotNumber, row.quantity, row.remarks]),
 ];
 
 export const exportCsv = (filename, headers, rows) => {

@@ -5,8 +5,8 @@ import { quantity } from '../../lib/format.js';
 import { inventoryTypeTotals } from '../../lib/inventory-type-totals.js';
 
 export default function DashboardPage({ products, allProducts = products, search, setSearch, typeFilter, setTypeFilter,
-  types, onHistory, onExport, exporting = false }) {
-  const typeTotals = inventoryTypeTotals(allProducts, types);
+  types, shipments = [], onHistory, onExport, exporting = false }) {
+  const typeTotals = inventoryTypeTotals(allProducts, types, shipments);
   return <>
     <PageHeading eyebrow="OVERVIEW" title="Inventory dashboard"
       subtitle="A clear view of your product stock and recent inventory position."
@@ -17,6 +17,7 @@ export default function DashboardPage({ products, allProducts = products, search
         <dl>
           <TypeMetric label="Total received" field="received" units={type.units} />
           <TypeMetric label="Total used" field="used" units={type.units} />
+          {String(type.name || '').trim().toLowerCase() === 'shipped products' && <TypeMetric label="Total shipped" field="shipped" units={type.units} />}
           <TypeMetric label="Current balance" field="balance" units={type.units} />
         </dl>
       </section>)}

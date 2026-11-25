@@ -4,12 +4,14 @@ import PageHeading from '../../components/PageHeading.jsx';
 import HistoryTable from '../../components/HistoryTable.jsx';
 import TransactionDialog from '../../components/TransactionDialog.jsx';
 import TransferDialog from '../../components/TransferDialog.jsx';
+import ShipmentDialog from '../../components/ShipmentDialog.jsx';
 import TransferHistoryTable from '../../components/TransferHistoryTable.jsx';
 import { quantity } from '../../lib/format.js';
 import { sortProducts } from '../../lib/product-sort.js';
 import { exportProductHistoryWorkbook } from '../../lib/product-history-workbook.js';
 import { exportProductHistoryPdf } from '../../lib/product-history-pdf.js';
 import { filterTransactionHistory } from '../../lib/history-search.js';
+import { isFinishedGoodsType } from '../../lib/product-type.js';
 import api from '../../lib/api.js';
 
 export default function InventoryHistoryPage({ products, types = [], onSaved, user }) {
@@ -27,6 +29,7 @@ export default function InventoryHistoryPage({ products, types = [], onSaved, us
   const [exporting, setExporting] = useState(null);
   const [transaction, setTransaction] = useState(null);
   const [transferOpen, setTransferOpen] = useState(false);
+  const [shipmentOpen, setShipmentOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [success, setSuccess] = useState('');
   const [refreshWarning, setRefreshWarning] = useState('');
@@ -37,6 +40,7 @@ export default function InventoryHistoryPage({ products, types = [], onSaved, us
   useEffect(() => {
     setTransaction(null);
     setTransferOpen(false);
+    setShipmentOpen(false);
     setHistorySearch('');
     setSuccess('');
     setRefreshWarning('');
@@ -59,6 +63,7 @@ export default function InventoryHistoryPage({ products, types = [], onSaved, us
   const refreshHistory = async (kind, message) => {
     setTransaction(null);
     setTransferOpen(false);
+    setShipmentOpen(false);
     setSuccess(message);
     setRefreshWarning('');
     setHistory(null);
@@ -73,6 +78,9 @@ export default function InventoryHistoryPage({ products, types = [], onSaved, us
   const onTransactionSaved = (kind, edited = false) => refreshHistory(kind,
     `${kind === 'receiving' ? 'Receiving' : 'Usage'} transaction ${edited ? 'updated' : 'saved'}.`);
   const onTransferSaved = () => refreshHistory('transfer', 'Inventory transfer saved.');
+  const onShipmentSaved = (result) => refreshHistory('shipment', result?.shippedProductCreated
+    ? 'Shipment saved and a zero-stock Shipped Products item was created.'
+    : 'Shipment saved to the Shipped Products log.');
 
   const onSelect = (id) => {
     const next = new URLSearchParams(params);
@@ -110,7 +118,7 @@ export default function InventoryHistoryPage({ products, types = [], onSaved, us
 
   return <>
     <PageHeading eyebrow="AUDIT TRAIL" title="Inventory history"
-      subtitle="Review all receiving and usage transactions for an individual product."
+      subtitle="Review receiving, usage, transfers, and shipments for an individual product."
       action={history && <div className="heading-actions">
         <button className="button secondary" onClick={() => onExport('xlsx')} disabled={Boolean(exporting)}>
           ⇩ {exporting === 'xlsx' ? 'Exporting…' : 'Export Excel'}</button>
@@ -133,6 +141,7 @@ export default function InventoryHistoryPage({ products, types = [], onSaved, us
         <button type="button" className="button primary" onClick={() => setTransaction({ kind: 'receiving', productId: selectedProductId })}>Receiving</button>
         <button type="button" className="button secondary" onClick={() => setTransaction({ kind: 'usage', productId: selectedProductId })}>Usage</button>
         <button type="button" className="button secondary" onClick={() => setTransferOpen(true)}>Transfer</button>
+        {isFinishedGoodsType(selectedProduct.productType) && <button type="button" className="button secondary" onClick={() => setShipmentOpen(true)}>Ship</button>}
       </div>}
     </section>
     {success && <div className="notice success" role="status">{success}</div>}
@@ -144,9 +153,11 @@ export default function InventoryHistoryPage({ products, types = [], onSaved, us
       transaction={transaction.row} onClose={() => setTransaction(null)} onSaved={onTransactionSaved} />}
     {transferOpen && selectedProduct && <TransferDialog key={selectedProductId} sourceProduct={selectedProduct}
       products={products} onClose={() => setTransferOpen(false)} onSaved={onTransferSaved} />}
+    {shipmentOpen && selectedProduct && <ShipmentDialog key={selectedProductId} product={selectedProduct}
+      onClose={() => setShipmentOpen(false)} onSaved={onShipmentSaved} />}
     {loading ? <div className="panel empty-state" role="status">Loading inventory history…</div>
       : !history ? <div className="panel empty-state"><div className="empty-icon">◷</div>
-      <strong>Select a product to view its history</strong><span>Receiving and usage records will appear here.</span></div>
+      <strong>Select a product to view its history</strong><span>Inventory movement history will appear here.</span></div>
       : <>
         <div className="balance-banner"><div><span>Current available balance</span><strong>
           {quantity(history.product.availableBalance)} <small>{history.product.unit}</small></strong></div>

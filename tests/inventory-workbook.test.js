@@ -176,6 +176,24 @@ test('dashboard download exports lot-wise rows and preserves product codes as te
   }
 });
 
+test('all-types workbook includes shipment log rows with the selected SKU and lot', async () => {
+  const workbook = await roundTrip([product()], types, { shipments: [{
+    id: 501, date: '2026-11-20', quantity: 3, sourceMaterialLotNumber: 'LOT-B',
+    finishedProductName: 'Finished SKU', finishedMakItemCode: 'FIN-1', finishedItemCode: 'F-1',
+    shippedProductName: 'Finished SKU', shippedMakItemCode: 'FIN-1', shippedItemCode: 'F-1', shippedUnit: 'Pcs', addedBy: 'Admin',
+  }] });
+  const sheet = workbook.getWorksheet('Shipment Log');
+  assert.deepEqual(sheet.getRow(1).values.slice(1), [
+    'Shipment Date', 'Finished Product', 'Finished MAK Item Code', 'Finished Item Code', 'Material Lot',
+    'Shipped Product', 'Shipped MAK Item Code', 'Shipped Item Code', 'Quantity Shipped', 'Unit', 'Shipped By',
+  ]);
+  assert.equal(sheet.getCell('A2').value.toISOString(), '2026-11-20T00:00:00.000Z');
+  assert.equal(sheet.getCell('E2').value, 'LOT-B');
+  assert.equal(sheet.getCell('I2').value, 3);
+  assert.equal(sheet.getCell('J2').value, 'Pcs');
+  assert.equal(sheet.getCell('K2').value, 'Admin');
+});
+
 test('invalid quantities fail explicitly and none of the report generation mutates source data', async () => {
   for (const value of [NaN, Infinity, 'not-a-number']) {
     await assert.rejects(createInventoryWorkbook([product()], types, { receiving: [{ productId: 17, materialLotNumber: 'LOT', quantity: value }] }), /finite numbers/);

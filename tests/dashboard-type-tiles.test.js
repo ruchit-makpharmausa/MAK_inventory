@@ -23,10 +23,10 @@ test('type totals aggregate all records by type ID and normalize compatible unit
   const original = JSON.stringify({ products, types });
   const totals = inventoryTypeTotals(products, types);
   assert.deepEqual(totals.map((type) => type.name), types.map((type) => type.name));
-  assert.deepEqual(totals[0].units, [{ unit: 'kgs', received: 20, used: 6, balance: 14 }]);
+  assert.deepEqual(totals[0].units, [{ unit: 'kgs', received: 20, used: 6, balance: 14, shipped: 0 }]);
   assert.deepEqual(totals[1].units, [
-    { unit: 'Pcs', received: 1500, used: 300, balance: 1200 },
-    { unit: 'kgs', received: 2.5, used: 0.25, balance: 2.25 },
+    { unit: 'Pcs', received: 1500, used: 300, balance: 1200, shipped: 0 },
+    { unit: 'kgs', received: 2.5, used: 0.25, balance: 2.25, shipped: 0 },
   ]);
   for (const empty of totals.slice(2)) assert.deepEqual(empty.units, []);
   assert.equal(JSON.stringify({ products, types }), original);
@@ -41,8 +41,15 @@ test('empty catalogs, unlisted types, missing totals and negative stock are not 
     { unit: '', totalReceived: 10, totalUsed: 4 },
   ], types);
   assert.equal(totals.length, 7);
-  assert.deepEqual(totals[5], { id: '9', name: 'Extra type', units: [{ unit: 'Pcs', received: 2, used: 3, balance: -1 }] });
-  assert.deepEqual(totals[6], { id: 'other', name: 'Other', units: [{ unit: '', received: 10, used: 4, balance: 6 }] });
+  assert.deepEqual(totals[5], { id: '9', name: 'Extra type', units: [{ unit: 'Pcs', received: 2, used: 3, balance: -1, shipped: 0 }] });
+  assert.deepEqual(totals[6], { id: 'other', name: 'Other', units: [{ unit: '', received: 10, used: 4, balance: 6, shipped: 0 }] });
+});
+
+test('Shipped Products dashboard totals show logged shipments while keeping stock balance at zero', () => {
+  const shippedType = { id: 6, name: 'Shipped Products' };
+  const shippedProduct = { id: 22, productTypeId: 6, productType: 'Shipped Products', unit: 'Pcs', totalReceived: 0, totalUsed: 0, availableBalance: 0 };
+  const totals = inventoryTypeTotals([shippedProduct], [...types, shippedType], [{ shippedProductId: 22, quantity: 500 }]);
+  assert.deepEqual(totals[5], { id: '6', name: 'Shipped Products', units: [{ unit: 'Pcs', received: 0, used: 0, balance: 0, shipped: 500 }] });
 });
 
 let vite;
@@ -104,4 +111,15 @@ test('tiles recalculate after catalog refresh and keep empty types visible', () 
   assert.equal((empty.match(/class="stat-card"/g) || []).length, 5);
   for (const type of types) for (const label of ['Total received', 'Total used', 'Current balance']) assertMetric(tile(empty, type.name), label, 0);
   assert.ok(tiles(html));
+});
+
+test('Shipped Products tile reports shipped quantity separately from zero stock', () => {
+  const shippedType = { id: 6, name: 'Shipped Products' };
+  const shippedProduct = { id: 22, productTypeId: 6, productType: 'Shipped Products', name: 'Sample', itemCode: 'S-1', unit: 'Pcs', totalReceived: 0, totalUsed: 0, availableBalance: 0 };
+  const html = render({
+    types: [...types, shippedType], allProducts: [...products, shippedProduct],
+    shipments: [{ shippedProductId: 22, quantity: 500 }],
+  });
+  assertMetric(tile(html, 'Shipped Products'), 'Total shipped', 500, 'Pcs');
+  assertMetric(tile(html, 'Shipped Products'), 'Current balance', 0, 'Pcs');
 });

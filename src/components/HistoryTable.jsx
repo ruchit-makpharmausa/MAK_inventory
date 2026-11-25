@@ -1,6 +1,8 @@
 import { dateLabel, quantity } from '../lib/format.js';
 
 export default function HistoryTable({ title, subtitle, rows, receiving = false, isAdmin = false, onEdit, emptyMessage }) {
+  const isShipment = (row) => row.makLotNumber === 'SHIPPED' && row.remarks === 'Shipped';
+  const hasShipments = !receiving && rows.some(isShipment);
   return <section className="panel history-panel">
     <div className="panel-heading"><div><h2>{title}</h2><p>{subtitle}</p></div>
       <span className="count-pill">{rows.length} entries</span></div>
@@ -17,8 +19,8 @@ export default function HistoryTable({ title, subtitle, rows, receiving = false,
         <thead><tr>
           <th scope="col">Date</th>
           {receiving && <th scope="col">Location</th>}
-          <th scope="col">{receiving ? 'MAK Release Number' : 'MAK lot number'}</th>
-          <th scope="col" className="numeric">{receiving ? 'Received quantity' : 'Used quantity'}</th>
+          <th scope="col">{receiving ? 'MAK Release Number' : hasShipments ? 'MAK lot / action' : 'MAK lot number'}</th>
+          <th scope="col" className="numeric">{receiving ? 'Received quantity' : hasShipments ? 'Quantity out' : 'Used quantity'}</th>
           <th scope="col">Remarks</th>
           {isAdmin && <th scope="col">Actions</th>}
         </tr></thead>
@@ -26,12 +28,12 @@ export default function HistoryTable({ title, subtitle, rows, receiving = false,
           <td>{dateLabel(row.date)}</td>
           {receiving && <td>{row.location || '—'}</td>}
           <td className={`history-reference${receiving ? '' : ' code-cell'}`}>
-            {(receiving ? row.makReleaseNumber : row.makLotNumber) || '—'}
+            {(receiving ? row.makReleaseNumber : isShipment(row) ? 'Shipped' : row.makLotNumber) || '—'}
             {row.materialLotNumber && <div className="muted-label">Material lot number: {row.materialLotNumber}</div>}
           </td>
           <td className="numeric">{quantity(row.quantity)}</td>
           <td className="history-remarks">{row.remarks || '—'}</td>
-          {isAdmin && <td><button type="button" className="button secondary" onClick={() => onEdit(row)}>Edit</button></td>}
+          {isAdmin && <td>{!isShipment(row) && <button type="button" className="button secondary" onClick={() => onEdit(row)}>Edit</button>}</td>}
         </tr>)}</tbody>
       </table></div>}
   </section>;

@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-
 import AppLayout from './components/AppLayout.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 import ProductModal from './components/ProductModal.jsx';
+import ExportDateRangeDialog from './components/ExportDateRangeDialog.jsx';
 import CompanySelection from './components/CompanySelection.jsx';
 import DashboardPage from './pages/dashboard/DashboardPage.jsx';
 import LoginPage from './pages/login/LoginPage.jsx';
@@ -10,6 +11,7 @@ import ProductsPage from './pages/products/ProductsPage.jsx';
 import ReceivingPage from './pages/receiving/ReceivingPage.jsx';
 import UsagePage from './pages/usage/UsagePage.jsx';
 import InventoryHistoryPage from './pages/history/InventoryHistoryPage.jsx';
+import ShippedProductsPage from './pages/shipments/ShippedProductsPage.jsx';
 import LotInventoryPage from './pages/lots/LotInventoryPage.jsx';
 import AdminPage from './pages/admin/AdminPage.jsx';
 import AuditLogPage from './pages/audit/AuditLogPage.jsx';
@@ -19,6 +21,7 @@ import { exportCsv } from './lib/csv.js';
 import { exportInventoryWorkbook } from './lib/inventory-workbook.js';
 import { exportTypeHistoryWorkbook } from './lib/type-history-workbook.js';
 import { loginDestination } from './lib/routes.js';
+import { filterTypeHistoryReport, inExportDateRange } from './lib/export-date-range.js';
 
 function App() {
   const [user, setUser] = useState(null);
@@ -30,12 +33,14 @@ function App() {
   const [products, setProducts] = useState([]);
   const [allProducts, setAllProducts] = useState([]);
   const [types, setTypes] = useState([]);
+  const [shipments, setShipments] = useState([]);
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
   const [editingProduct, setEditingProduct] = useState(null);
   const [message, setMessage] = useState(null);
   const [busy, setBusy] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [exportRequest, setExportRequest] = useState(null);
   const exportInProgress = useRef(false);
 
   useEffect(() => {
@@ -70,6 +75,7 @@ function App() {
       setProducts([]);
       setAllProducts([]);
       setTypes([]);
+      setShipments([]);
       setSearch('');
       setTypeFilter('');
       setEditingProduct(null);
@@ -86,6 +92,7 @@ function App() {
       setProducts([]);
       setAllProducts([]);
       setTypes([]);
+      setShipments([]);
       setSearch('');
       setTypeFilter('');
       setEditingProduct(null);
@@ -112,6 +119,10 @@ function App() {
     setTypes(productTypes);
   }, []);
 
+  const loadShipments = useCallback(async () => {
+    setShipments(await api('/api/shipments'));
+  }, []);
+
   useEffect(() => {
     if (!user?.company) return;
     loadProducts().catch((error) => setMessage({ kind: 'error', text: error.message }));
@@ -122,9 +133,14 @@ function App() {
     loadBase().catch((error) => setMessage({ kind: 'error', text: error.message }));
   }, [loadBase, user]);
 
+  useEffect(() => {
+    if (!user?.company) return;
+    loadShipments().catch((error) => setMessage({ kind: 'error', text: error.message }));
+  }, [loadShipments, user?.company?.id]);
+
   const refresh = useCallback(async () => {
-    await Promise.all([loadProducts(), loadBase()]);
-  }, [loadBase, loadProducts]);
+    await Promise.all([loadProducts(), loadBase(), loadShipments()]);
+  }, [loadBase, loadProducts, loadShipments]);
 
   const openHistory = (id) => navigate(`/inv_history${id ? `?productId=${encodeURIComponent(id)}` : ''}`);
 
@@ -135,31 +151,41 @@ function App() {
 
   const onTransactionSaved = async (kind) => {
     setMessage({ kind: 'success', text: kind === 'transfer' ? 'Inventory transfer saved.'
-      : `${kind === 'receiving' ? 'Receiving' : 'Usage'} transaction saved.` });
+      : kind === 'shipment' ? 'Shipment saved to the Shipped Products log.'
+        : `${kind === 'receiving' ? 'Receiving' : 'Usage'} transaction saved.` });
     await refresh();
   };
 
-  const exportDashboard = async (typeId = '') => {
+  const exportDashboard = (typeId = '') => setExportRequest({ typeId });
+
+  const performDashboardExport = async ({ fromDate, toDate }) => {
+    const range = { fromDate, toDate };
     if (exportInProgress.current) return;
     exportInProgress.current = true;
     setExporting(true);
     try {
-      if (typeId) {
-        const report = await api(`/api/product-types/${encodeURIComponent(typeId)}/history`);
-        await exportTypeHistoryWorkbook(report);
+      if (exportRequest?.typeId) {
+        const report = await api(`/api/product-types/${encodeURIComponent(exportRequest.typeId)}/history`);
+        const filteredReport = filterTypeHistoryReport(report, range);
+        await exportTypeHistoryWorkbook(filteredReport);
         setMessage({ kind: 'success', text: `${report.type.name} product history workbook downloaded.` });
       } else {
-        const [receiving, usage] = await Promise.all([
-          api('/api/transactions/receiving'), api('/api/transactions/usage'),
+        const [receiving, usage, shipmentRows] = await Promise.all([
+          api('/api/transactions/receiving'), api('/api/transactions/usage'), api('/api/shipments'),
         ]);
-        await exportInventoryWorkbook(allProducts, types, { receiving, usage });
+        await exportInventoryWorkbook(allProducts, types, {
+          receiving: receiving.filter((row) => inExportDateRange(row, range)),
+          usage: usage.filter((row) => inExportDateRange(row, range)),
+          shipments: shipmentRows.filter((row) => inExportDateRange(row, range)),
+        });
         setMessage({ kind: 'success', text: 'Inventory Excel workbook downloaded.' });
       }
-    } catch {
-      setMessage({ kind: 'error', text: 'Unable to export the Excel workbook. Please try again.' });
+    } catch (error) {
+      setMessage({ kind: 'error', text: `Unable to export the Excel workbook. ${error?.message || 'Please try again.'}` });
     } finally {
       exportInProgress.current = false;
       setExporting(false);
+      setExportRequest(null);
     }
   };
 
@@ -217,6 +243,7 @@ function App() {
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<DashboardPage
             products={products} allProducts={allProducts}
+            shipments={shipments}
             search={search} setSearch={setSearch} typeFilter={typeFilter} setTypeFilter={setTypeFilter}
             types={types} onHistory={openHistory} onExport={exportDashboard} exporting={exporting} />} />
           <Route path="/products" element={<ProductsPage products={allProducts} search={search}
@@ -225,6 +252,7 @@ function App() {
           <Route path="/receiving" element={<ReceivingPage products={allProducts} types={types} onSaved={onTransactionSaved} />} />
           <Route path="/usage" element={<UsagePage products={allProducts} types={types} onSaved={onTransactionSaved} />} />
           <Route path="/inv_history" element={<InventoryHistoryPage products={allProducts} types={types} onSaved={onTransactionSaved} user={user} />} />
+          <Route path="/shipped-products" element={<ShippedProductsPage />} />
           <Route path="/lot-inventory" element={<LotInventoryPage products={allProducts} types={types} user={user} onSaved={onTransactionSaved} />} />
           <Route path="/audit-log" element={user?.isAdmin ? <AuditLogPage /> : <Navigate to="/dashboard" replace />} />
           <Route path="/history" element={<Navigate to={`/inv_history${location.search}${location.hash}`} replace />} />
@@ -235,6 +263,9 @@ function App() {
     </Routes>
     {user && editingProduct && <ProductModal editingProduct={editingProduct} types={types}
       onAddType={addProductType} onSubmit={saveProduct} onClose={() => setEditingProduct(null)} busy={busy} />}
+    {exportRequest && <ExportDateRangeDialog typeName={exportRequest.typeId
+      ? types.find((type) => String(type.id) === String(exportRequest.typeId))?.name || 'Selected type' : 'All product types'}
+      exporting={exporting} onClose={() => { if (!exporting) setExportRequest(null); }} onExport={performDashboardExport} />}
   </>;
 }
 

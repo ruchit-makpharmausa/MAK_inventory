@@ -6,7 +6,7 @@ import test from 'node:test';
 import { createApp } from '../server/app.js';
 import { loginDestination, navigation } from '../src/lib/routes.js';
 
-const pagePaths = ['/dashboard', '/products', '/receiving', '/usage', '/inv_history', '/lot-inventory', '/audit-log', '/admin'];
+const pagePaths = ['/dashboard', '/products', '/receiving', '/usage', '/inv_history', '/shipped-products', '/lot-inventory', '/audit-log', '/admin'];
 
 test('workspace navigation defines distinct page URLs', () => {
   assert.deepEqual(navigation.map((item) => item.path), pagePaths);

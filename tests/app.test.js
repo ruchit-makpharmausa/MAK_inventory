@@ -323,6 +323,116 @@ test('usage validates a received material lot under the product lock and preserv
   });
 });
 
+test('shipping deducts the requested quantity from one selected SKU lot and logs that lot', async () => {
+  const finishedGoods = { ...product, productType: 'FINISHED PRODUCT', availableBalance: 8 };
+  const db = mockDatabase([
+    [{ id: 17 }], [finishedGoods],
+    [{ materialLotNumber: 'LOT-A', availableQuantity: 5 }, { materialLotNumber: 'LOT-B', availableQuantity: 3 }],
+    [], [{ id: 22 }], [], [{ id: 18 }],
+    [{ id: 401 }], [{ id: 501 }], [{ ...finishedGoods, availableBalance: 5 }],
+  ]);
+  await withApi(db, async (request) => {
+    const result = await request('/api/transactions/shipping', { productId: 17, sourceMaterialLotNumber: 'LOT-B', shipmentDate: '2026-11-20', quantity: 3 });
+    assert.equal(result.status, 201, result.body.error);
+    assert.deepEqual(result.body.usageIds, [401]);
+    assert.equal(result.body.sourceMaterialLotNumber, 'LOT-B');
+    assert.equal(result.body.id, 501);
+    assert.equal(result.body.shippedProductId, 18);
+    assert.equal(result.body.shippedProductCreated, true);
+    assert.equal(result.body.product.availableBalance, 5);
+  });
+  const inserts = db.calls.filter((call) => call.statement.includes('INSERT INTO dbo.usage_transactions'));
+  assert.equal(inserts.length, 1);
+  assert.equal(inserts[0].parameters.materialLotNumber[1], 'LOT-B');
+  assert.equal(inserts[0].parameters.quantity[1], 3);
+  assert.ok(inserts.every((call) => /N'SHIPPED', N'Shipped'/.test(call.statement)));
+  assert.ok(inserts.every((call) => call.parameters.date[1].toISOString() === '2026-11-20T00:00:00.000Z'));
+  assert.ok(db.calls.every((call) => call.executor === db.token));
+  const shipmentInsert = db.calls.find((call) => call.statement.includes('INSERT INTO dbo.inventory_shipments'));
+  assert.ok(shipmentInsert);
+  assert.equal(shipmentInsert.parameters.finishedProductId[1], 17);
+  assert.equal(shipmentInsert.parameters.shippedProductId[1], 18);
+  assert.equal(shipmentInsert.parameters.quantity[1], 3);
+  assert.equal(shipmentInsert.parameters.sourceMaterialLotNumber[1], 'LOT-B');
+  const productInsert = db.calls.find((call) => call.statement.includes('INSERT INTO dbo.products'));
+  assert.ok(productInsert);
+  assert.equal(productInsert.parameters.productTypeId[1], 22);
+  assert.equal(productInsert.parameters.itemCode[1], finishedGoods.itemCode);
+  assert.equal(productInsert.parameters.makItemCode[1], finishedGoods.makItemCode);
+  assert.equal(productInsert.parameters.name[1], finishedGoods.name);
+  assert.match(db.calls.find((call) => call.statement.includes('INSERT INTO dbo.product_types')).statement, /N'Shipped Products'/);
+  assert.equal(db.calls.filter((call) => /INSERT INTO dbo\.(?:receiving_transactions|inventory_transfers)/.test(call.statement)).length, 0);
+});
+
+test('later shipments reuse the Shipped Products record for the same MAK Item Code', async () => {
+  const finishedGoods = { ...product, productType: 'Finished Goods', availableBalance: 4 };
+  const db = mockDatabase([
+    [{ id: 17 }], [finishedGoods], [{ materialLotNumber: 'LOT-A', availableQuantity: 4 }],
+    [{ id: 22 }], [{ id: 18 }], [{ id: 401 }], [{ id: 501 }], [{ ...finishedGoods, availableBalance: 3 }],
+  ]);
+  await withApi(db, async (request) => {
+    const result = await request('/api/transactions/shipping', { productId: 17, sourceMaterialLotNumber: 'LOT-A', shipmentDate: '2026-11-20', quantity: 1 });
+    assert.equal(result.status, 201, result.body.error);
+    assert.equal(result.body.shippedProductId, 18);
+    assert.equal(result.body.shippedProductCreated, false);
+  });
+  assert.equal(db.calls.some((call) => call.statement.includes('INSERT INTO dbo.products')), false);
+  assert.equal(db.calls.some((call) => call.statement.includes('INSERT INTO dbo.product_types')), false);
+});
+
+test('invalid shipment quantity does not create a Shipped Products item or shipment record', async () => {
+  const finishedGoods = { ...product, productType: 'Finished Goods', availableBalance: 1 };
+  const db = mockDatabase([[{ id: 17 }], [finishedGoods]]);
+  await withApi(db, async (request) => {
+    const result = await request('/api/transactions/shipping', { productId: 17, sourceMaterialLotNumber: 'LOT-A', shipmentDate: '2026-11-20', quantity: 2 });
+    assert.equal(result.status, 400);
+    assert.match(result.body.error, /Insufficient inventory/);
+  });
+
+  assert.equal(db.calls.some((call) => /INSERT INTO dbo\.(?:products|product_types|inventory_shipments|usage_transactions)/.test(call.statement)), false);
+});
+
+test('shipping cannot exceed the selected lot balance even when other lots contain stock', async () => {
+  const finishedGoods = { ...product, productType: 'Finished Goods', availableBalance: 8 };
+  const db = mockDatabase([[{ id: 17 }], [finishedGoods], [
+    { materialLotNumber: 'LOT-A', availableQuantity: 5 }, { materialLotNumber: 'LOT-B', availableQuantity: 3 },
+  ]]);
+  await withApi(db, async (request) => {
+    const result = await request('/api/transactions/shipping', { productId: 17, sourceMaterialLotNumber: 'LOT-A', shipmentDate: '2026-11-20', quantity: 6 });
+    assert.equal(result.status, 400);
+    assert.match(result.body.error, /selected lot/);
+  });
+  assert.equal(db.calls.some((call) => /INSERT INTO dbo\.(?:products|product_types|inventory_shipments|usage_transactions)/.test(call.statement)), false);
+});
+
+test('shipping rejects non-finished-goods products and invalid quantities', async () => {
+  const noDatabase = mockDatabase();
+  await withApi(noDatabase, async (request) => {
+    assert.equal((await request('/api/transactions/shipping', { productId: 17, shipmentDate: '2026-11-20', quantity: 0 })).status, 400);
+    assert.equal(noDatabase.calls.length, 0);
+  });
+  const db = mockDatabase([[{ id: 17 }], [product]]);
+  await withApi(db, async (request) => {
+    const result = await request('/api/transactions/shipping', { productId: 17, sourceMaterialLotNumber: 'LOT-A', shipmentDate: '2026-11-20', quantity: 1 });
+    assert.equal(result.status, 400);
+    assert.match(result.body.error, /Only Finished Goods/);
+    assert.equal(db.calls.some((call) => call.statement.includes('INSERT INTO dbo.usage_transactions')), false);
+  });
+});
+
+test('shipment log lists the SKU, selected material lot, and shipped-product reference', async () => {
+  const shipment = { id: 501, date: '2026-11-20', quantity: 7, sourceMaterialLotNumber: 'LOT-A', finishedProductName: 'Finished A', shippedProductName: 'Shipment log item' };
+  const db = mockDatabase([[shipment]]);
+  await withApi(db, async (request) => {
+    const result = await request('/api/shipments');
+    assert.deepEqual(result, { status: 200, body: [shipment] });
+  });
+  assert.equal(db.calls[0].parameters.companyId[1], 7);
+  assert.match(db.calls[0].statement, /FROM dbo\.inventory_shipments s/);
+  assert.match(db.calls[0].statement, /s\.source_material_lot_number AS sourceMaterialLotNumber/);
+  assert.match(db.calls[0].statement, /WHERE s\.company_id = @companyId/);
+});
+
 test('usage rejects unknown, exhausted, orphaned, other-product and differently cased material lots without inserting', async () => {
   for (const materialLotNumber of ['UNKNOWN', 'EXHAUSTED', 'ORPHAN', 'OTHER-PRODUCT', 'lot']) {
     const availableLots = ['EXHAUSTED', 'ORPHAN'].includes(materialLotNumber) ? [] : [{ materialLotNumber: 'LOT', availableQuantity: 10 }];

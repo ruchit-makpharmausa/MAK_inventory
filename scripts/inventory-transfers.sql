@@ -21,6 +21,7 @@ BEGIN TRY
             source_product_id INT NOT NULL,
             destination_product_id INT NOT NULL,
             source_material_lot_number NVARCHAR(255) NULL,
+            destination_material_lot_number NVARCHAR(255) NULL,
             destination_mak_lot_number NVARCHAR(255) NOT NULL,
             transfer_date DATE NOT NULL,
             quantity FLOAT NOT NULL,
@@ -36,6 +37,9 @@ BEGIN TRY
         CREATE INDEX IX_inventory_transfers_source ON dbo.inventory_transfers(company_id, source_product_id, transfer_date, id);
         CREATE INDEX IX_inventory_transfers_destination ON dbo.inventory_transfers(company_id, destination_product_id, transfer_date, id);
     END;
+
+    IF COL_LENGTH(N'dbo.inventory_transfers', N'destination_material_lot_number') IS NULL
+        ALTER TABLE dbo.inventory_transfers ADD destination_material_lot_number NVARCHAR(255) NULL;
 
     COMMIT TRANSACTION;
 END TRY

@@ -69,4 +69,7 @@ test('history CSV uses the stored receiving reference and leaves the usage relea
     ['Usage', '2026-10-08', '', '', 'M1234', 2500, 'Used'],
   ]);
   assert.deepEqual(inventoryHistoryRows({ receiving: [], usage: [] }), []);
+  assert.deepEqual(inventoryHistoryRows({ receiving: [], usage: [{ ...usage, makLotNumber: 'SHIPPED', remarks: 'Shipped' }] }), [
+    ['Shipment', '2026-10-08', '', '', '', 2500, 'Shipped'],
+  ]);
 });

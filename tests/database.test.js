@@ -37,6 +37,12 @@ test('existing schema is checked using only a read; missing columns stop connect
   await assert.rejects(verifyExistingSchema(pool), (error) => error.status === 503 && /mak_item_code/.test(error.message));
 });
 
+test('shipment ledger is required before the app accepts connections', async () => {
+  const rows = Object.entries(expectedColumns).flatMap(([tableName, columns]) => columns.map((columnName) => ({ tableName, columnName })));
+  const pool = { request: () => ({ async query() { return { recordset: rows.filter((row) => row.tableName !== 'inventory_shipments') }; } }) };
+  await assert.rejects(verifyExistingSchema(pool), (error) => error.status === 503 && /dbo\.inventory_shipments/.test(error.message));
+});
+
 test('the receiving location column is required before accepting transactions', async () => {
   const rows = Object.entries(expectedColumns).flatMap(([tableName, columns]) => columns
     .filter((columnName) => columnName !== 'location').map((columnName) => ({ tableName, columnName })));

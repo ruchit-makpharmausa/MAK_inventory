@@ -4,6 +4,7 @@ export const navigation = [
   { path: '/receiving', label: 'Receiving', icon: '↓' },
   { path: '/usage', label: 'Usage', icon: '↑' },
   { path: '/inv_history', label: 'Inventory History', icon: '◷' },
+  { path: '/shipped-products', label: 'Shipped Products', icon: '↗' },
   { path: '/lot-inventory', label: 'Lot Inventory', icon: '▦' },
   { path: '/audit-log', label: 'Audit Log', icon: '◷', adminOnly: true },
   { path: '/admin', label: 'Admin Panel', icon: '⚙', adminOnly: true },

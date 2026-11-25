@@ -23,6 +23,23 @@ test('dashboard advertises Excel export with a busy state while Product Master r
   }
 });
 
+test('export date dialog offers optional inclusive start and end dates', async () => {
+  const vite = await createServer({ optimizeDeps: { noDiscovery: true, include: [] }, server: { middlewareMode: true, hmr: { server: createHttpServer() }, watch: null }, appType: 'custom' });
+  try {
+    const { default: ExportDateRangeDialog } = await vite.ssrLoadModule('/src/components/ExportDateRangeDialog.jsx');
+    const html = renderToStaticMarkup(createElement(ExportDateRangeDialog, {
+      typeName: 'All product types', exporting: false, onClose() {}, onExport() {},
+    }));
+    assert.match(html, /Choose report date range/);
+    assert.match(html, /All product types/);
+    assert.match(html, /name="fromDate" type="date"/);
+    assert.match(html, /name="toDate" type="date"/);
+    assert.match(html, /Leave both blank to export all dates/);
+  } finally {
+    await vite.close();
+  }
+});
+
 function findElement(element, predicate) {
   if (!isValidElement(element)) return undefined;
   if (predicate(element)) return element;
